@@ -1,0 +1,11 @@
+<!--
+SPDX-FileCopyrightText: 2026 Pagefault Games
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Keagan Edition">
+  <rect width="64" height="64" rx="8" fill="#17121f"/>
+  <path d="M7 7h50v50H7z" fill="#2f263b" stroke="#8f7c9d" stroke-width="2"/>
+  <path d="M15 16h8v12h5V16h8v12h-5v8h5v12h-8V36h-5v12h-8z" fill="#e43b45"/>
+  <path d="M39 16h12v7h-7v5h7v7h-7v6h7v7H39z" fill="#ffd761"/>
+  <path d="M10 10h8v2h-6v6h-2zm36 42h6v-6h2v8h-8z" fill="#76e9de"/>
+</svg>

@@ -37,6 +37,11 @@ export class LearnMovePhase extends PlayerPartyMemberPokemonPhase {
     this.cost = cost;
   }
 
+  /** Exposes the pending move for deterministic, UI-independent autoplay planning. */
+  public getMoveToLearn(): Move {
+    return allMoves[this.moveId];
+  }
+
   public override start(): void {
     super.start();
 

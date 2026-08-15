@@ -7,8 +7,14 @@
 all:
   - "package.json"
   - "pnpm-lock.yaml"
+  - "pnpm-workspace.yaml"
   - ".nvmrc"
+  - ".dependency-cruiser.cjs"
+  - ".ls-lint.yml"
+  - "biome.jsonc"
+  - ".github/lint-filters.yml"
   - ".github/workflows/linting.yml"
+  - ".github/workflows/publish-keagan-windows.yml"
 
 # main repo TS files
 ts-files:
@@ -22,6 +28,11 @@ ts-files:
 # main repo JS files
 js-files:
   - ".dependency-cruiser.cjs"
+  - "electron/**/*.cjs"
+  - "scripts/**/*.cjs"
+  - "website/**/*.js"
+  - "website/**/*.cjs"
+  - "website/**/*.mjs"
   - "typedoc.config.js"
   - "plugins/typedoc/**/*.js"
   - "jsconfig.json"
@@ -34,6 +45,27 @@ github-scripts:
 # scripts run locally and related files
 local-scripts:
   - "scripts/**/*.ts"
+  - "scripts/**/*.ps1"
+  - "scripts/**/*.cjs"
   - "scripts/tsconfig.json"
   - "tsconfig.json"
   - ".env*"
+
+# Electron entrypoints and Windows packaging configuration
+desktop-files:
+  - ".env.app"
+  - "electron/**/*.cjs"
+  - "electron-builder.json"
+  - "scripts/**/*.ps1"
+  - "scripts/**/*.cjs"
+  - "src/api/**/*.ts"
+  - "src/main.ts"
+  - "src/utils/cookies.ts"
+  - "vite.config.ts"
+
+# Static Keagan Edition landing site
+website-files:
+  - "website/**/*"
+  - "package.json"
+  - "pnpm-lock.yaml"
+  - ".github/workflows/linting.yml"

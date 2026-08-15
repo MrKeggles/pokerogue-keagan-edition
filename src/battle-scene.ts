@@ -1,5 +1,6 @@
 import { applyAbAttrs } from "#abilities/apply-ab-attrs";
 import { Animation } from "#app/animations";
+import { AutoplayController } from "#app/autoplay-controller";
 import { Battle } from "#app/battle";
 import {
   ANTI_VARIANCE_WEIGHT_MODIFIER,
@@ -174,6 +175,7 @@ export interface InfoToggle {
  */
 // TODO: Breakup into multiple scenes if possible/practical
 export class BattleScene extends SceneBase {
+  private autoplayController: AutoplayController;
   public inputController: InputsController;
   public uiInputs: UiInputs;
 
@@ -394,6 +396,7 @@ export class BattleScene extends SceneBase {
     initGameSpeed(this);
     this.inputController = new InputsController();
     this.uiInputs = new UiInputs(this.inputController);
+    this.autoplayController = new AutoplayController();
 
     this.gameData = new GameData();
 
@@ -409,8 +412,9 @@ export class BattleScene extends SceneBase {
     this.launchBattle();
   }
 
-  update() {
+  update(time: number) {
     this.ui?.update();
+    this.autoplayController?.update(time);
   }
 
   // TODO: Split this up into multiple sub-methods
@@ -2020,13 +2024,21 @@ export class BattleScene extends SceneBase {
     const tempRngOffset = this.rngOffset;
     const tempRngSeedOverride = this.rngSeedOverride;
     const state = Phaser.Math.RND.state();
+    const battle = this.currentBattle;
+    const battleSeedState = battle?.captureSeedState();
     Phaser.Math.RND.sow([shiftCharCodes(seedOverride || this.seed, offset)]);
     this.rngOffset = offset;
     this.rngSeedOverride = seedOverride || "";
-    func();
-    Phaser.Math.RND.state(state);
-    this.rngOffset = tempRngOffset;
-    this.rngSeedOverride = tempRngSeedOverride;
+    try {
+      func();
+    } finally {
+      Phaser.Math.RND.state(state);
+      this.rngOffset = tempRngOffset;
+      this.rngSeedOverride = tempRngSeedOverride;
+      if (battleSeedState !== undefined) {
+        battle.restoreSeedState(battleSeedState);
+      }
+    }
   }
 
   addFieldSprite(

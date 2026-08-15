@@ -1325,6 +1325,25 @@ export class SummaryUiHandler extends UiHandler {
     return null;
   }
 
+  /**
+   * Selects an old move slot (0-3), or row 4 to reject the pending move.
+   * This is intentionally restricted to the learn-move summary mode.
+   */
+  public selectMoveForLearning(moveIndex: number): boolean {
+    if (
+      this.summaryUiMode !== SummaryUiMode.LEARN_MOVE
+      || !this.moveSelect
+      || !Number.isInteger(moveIndex)
+      || moveIndex < 0
+      || moveIndex > 4
+    ) {
+      return false;
+    }
+
+    this.setCursor(moveIndex);
+    return this.processInput(Button.ACTION);
+  }
+
   showMoveSelect() {
     this.moveSelect = true;
     this.extraMoveRowContainer.setVisible(true);

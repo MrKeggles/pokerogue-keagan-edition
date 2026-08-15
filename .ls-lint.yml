@@ -7,6 +7,7 @@
 # Note that the `_cfg` key isn't part of ls-lint's configuration, it's just a YAML anchor for reuse.
 _cfg: &cfg
    .ps1: kebab-case
+   .cjs: kebab-case
    .ts: kebab-case
    .js: kebab-case
    .*.ts: kebab-case
@@ -36,3 +37,5 @@ ignore:
    - .devcontainer
    - "LICENSES"
    - .idea
+   - .edge-smoke-profile*
+   - release

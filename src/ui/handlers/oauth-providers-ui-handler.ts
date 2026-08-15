@@ -1,4 +1,5 @@
 import { globalScene } from "#app/global-scene";
+import { isApp } from "#constants/app-constants";
 import { TextStyle } from "#enums/text-style";
 import { LoginRegisterInfoContainerUiHandler } from "#ui/login-register-info-container-ui-handler";
 import { addTextObject } from "#ui/text";
@@ -68,6 +69,13 @@ export abstract class OAuthProvidersUiHandler extends LoginRegisterInfoContainer
   }
 
   protected processExternalProvider(): void {
+    // OAuth login callbacks terminate on the public web origin and cannot return
+    // a session token to the desktop custom protocol. Username/password login
+    // remains available in desktop builds.
+    if (isApp) {
+      return;
+    }
+
     const titleX = 22;
     this.externalPartyTitle
       .setText(i18next.t("menu:orUse"))

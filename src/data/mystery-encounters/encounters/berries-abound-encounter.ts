@@ -297,7 +297,7 @@ export const BerriesAboundEncounter: MysteryEncounter = MysteryEncounterBuilder.
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.3.label`,
       buttonTooltip: `${namespace}:option.3.tooltip`,

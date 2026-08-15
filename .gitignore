@@ -47,3 +47,9 @@ coverage
 # Script outputs
 *.csv
 species-output/*
+
+# Generated desktop packages and local smoke-test artifacts
+/release/
+/.edge-smoke-profile*/
+/autoplay-smoke*.png
+/package-lock.json

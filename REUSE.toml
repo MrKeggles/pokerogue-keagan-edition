@@ -24,6 +24,7 @@ path = [
     # Config files
     ".dependency-cruiser.cjs",
     # Json files that can't be commented
+    "electron-builder.json",
     "package.json",
     "tsconfig.json",
     "tsdoc.json",

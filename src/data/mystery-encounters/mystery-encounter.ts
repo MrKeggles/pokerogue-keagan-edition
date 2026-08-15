@@ -639,6 +639,20 @@ export class MysteryEncounterBuilder implements Partial<IMysteryEncounter> {
     );
   }
 
+  /** Defines a streamlined option that has been reviewed for unattended selection. */
+  withSimpleAutoplaySafeOption(
+    dialogue: OptionTextDisplay,
+    callback: OptionPhaseCallback,
+  ): this & Pick<IMysteryEncounter, "options"> {
+    return this.withOption(
+      MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DEFAULT)
+        .withAutoplaySafeOption()
+        .withDialogue(dialogue)
+        .withOptionPhase(callback)
+        .build(),
+    );
+  }
+
   /**
    * Defines an option + phase for the encounter.
    * Use for easy/streamlined options.

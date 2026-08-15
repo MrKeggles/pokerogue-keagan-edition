@@ -224,7 +224,7 @@ export const ShadyVitaminDealerEncounter: MysteryEncounter = MysteryEncounterBui
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.3.label`,
       buttonTooltip: `${namespace}:option.3.tooltip`,

@@ -11,6 +11,57 @@ import { removeCookie, setCookie } from "#utils/cookies";
 
 /** A wrapper for PokéRogue account API requests. */
 export class PokerogueAccountApi extends ApiBase {
+  private parseThrownAccountError(err: unknown, fallback: string): string {
+    const message = err instanceof Error ? err.message : String(err);
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes("failed to fetch")
+      || normalized.includes("networkerror")
+      || normalized.includes("load failed")
+    ) {
+      return `NET01: ${fallback} failed to reach the API (${message})`;
+    }
+
+    if (normalized.includes("cors")) {
+      return `NET02: ${fallback} blocked by CORS (${message})`;
+    }
+
+    if (normalized.includes("ssl") || normalized.includes("tls") || normalized.includes("certificate")) {
+      return `NET03: ${fallback} failed due to TLS/SSL validation (${message})`;
+    }
+
+    return `NET99: ${fallback} failed before receiving a server response (${message})`;
+  }
+
+  private async parseAccountError(response: Response, fallback: string): Promise<string> {
+    const statusFallback = `${fallback} (${response.status})`;
+
+    try {
+      const body = (await response.text())?.trim();
+      if (!body) {
+        return statusFallback;
+      }
+
+      const lowerBody = body.toLowerCase();
+      const isHtmlResponse = lowerBody.includes("<!doctype html") || lowerBody.includes("<html");
+      const isCloudflareChallenge =
+        lowerBody.includes("cloudflare")
+        || lowerBody.includes("attention required")
+        || lowerBody.includes("cf-chl")
+        || lowerBody.includes("challenge-platform");
+
+      if (isHtmlResponse && isCloudflareChallenge) {
+        return "CF01: Account requests are being blocked by Cloudflare in this desktop build. Use the browser version for register/login for now.";
+      }
+
+      return body;
+    } catch (err) {
+      console.warn("Could not parse account error response!", err);
+      return statusFallback;
+    }
+  }
+
   /**
    * Request the {@linkcode AccountInfoResponse | UserInfo} of the logged in user.
    * The user is identified by the {@linkcode SESSION_ID_COOKIE_NAME | session cookie}.
@@ -43,12 +94,11 @@ export class PokerogueAccountApi extends ApiBase {
       if (response.ok) {
         return null;
       }
-      return response.text();
+      return await this.parseAccountError(response, "Registration failed");
     } catch (err) {
       console.warn("Register failed!", err);
+      return this.parseThrownAccountError(err, "Registration");
     }
-
-    return "Unknown registration error!";
   }
 
   /**
@@ -67,12 +117,11 @@ export class PokerogueAccountApi extends ApiBase {
         return null;
       }
       console.warn("Login failed!", response.status, response.statusText);
-      return response.text();
+      return await this.parseAccountError(response, "Login failed");
     } catch (err) {
       console.warn("Login failed!", err);
+      return this.parseThrownAccountError(err, "Login");
     }
-
-    return "Unknown login error!";
   }
 
   /**
@@ -101,11 +150,10 @@ export class PokerogueAccountApi extends ApiBase {
         return null;
       }
       console.warn("Change password failed!", response.status, response.statusText);
-      return response.text();
+      return await this.parseAccountError(response, "Change password failed");
     } catch (err) {
       console.warn("Change password failed!", err);
+      return this.parseThrownAccountError(err, "Change password");
     }
-
-    return "Unknown error!";
   }
 }

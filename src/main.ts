@@ -4,7 +4,7 @@ import "#app/i18n"; // Initializes i18n on import
 
 import { InvertPostFX } from "#app/pipelines/invert";
 import { preventDoubleTapZoom } from "#app/touch-controls";
-import { isBeta, isDev } from "#constants/app-constants";
+import { isApp, isBeta, isDev } from "#constants/app-constants";
 import { version } from "#package.json";
 import Phaser from "phaser";
 import BBCodeTextPlugin from "phaser3-rex-plugins/plugins/bbcodetext-plugin";
@@ -12,7 +12,23 @@ import InputTextPlugin from "phaser3-rex-plugins/plugins/inputtext-plugin";
 import TransitionImagePackPlugin from "phaser3-rex-plugins/templates/transitionimagepack/transitionimagepack-plugin";
 import UIPlugin from "phaser3-rex-plugins/templates/ui/ui-plugin";
 
-if (isBeta || isDev) {
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").then(
+      () => console.log("ServiceWorker registration successful"),
+      err => console.log("ServiceWorker registration failed: ", err),
+    );
+  });
+}
+
+window.addEventListener("beforeinstallprompt", event => {
+  // Prevent invasive install prompts; manual installation remains available.
+  event.preventDefault();
+});
+
+if (isApp) {
+  document.title = "PokéRogue Keagan Edition";
+} else if (isBeta || isDev) {
   document.title += " (Beta)";
 }
 

@@ -481,7 +481,7 @@ export abstract class Move implements Localizable {
    * @param target - The {@linkcode Pokemon} targeted by this move
    * @returns Whether this Move will hit the target's Substitute (assuming one exists).
    */
-  hitsSubstitute(user: Pokemon, target?: Pokemon): boolean {
+  hitsSubstitute(user: Pokemon, target?: Pokemon, simulated = false): boolean {
     if (
       [MoveTarget.USER, MoveTarget.USER_SIDE, MoveTarget.ENEMY_SIDE, MoveTarget.BOTH_SIDES].includes(this.moveTarget)
       || !target?.getTag(BattlerTagType.SUBSTITUTE)
@@ -490,8 +490,7 @@ export abstract class Move implements Localizable {
     }
 
     const bypassed = new BooleanHolder(false);
-    // TODO: Allow this to be simulated
-    applyAbAttrs("InfiltratorAbAttr", { pokemon: user, bypassed });
+    applyAbAttrs("InfiltratorAbAttr", { pokemon: user, bypassed, simulated });
 
     return !bypassed.value && !this.hasFlag(MoveFlags.SOUND_BASED) && !this.hasFlag(MoveFlags.IGNORE_SUBSTITUTE);
   }

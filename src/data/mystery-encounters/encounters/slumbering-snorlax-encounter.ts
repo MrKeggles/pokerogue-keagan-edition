@@ -144,7 +144,7 @@ export const SlumberingSnorlaxEncounter: MysteryEncounter = MysteryEncounterBuil
       await initBattleWithEnemyConfig(encounter.enemyPartyConfigs[0]);
     },
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

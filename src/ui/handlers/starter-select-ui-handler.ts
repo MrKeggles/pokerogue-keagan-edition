@@ -754,6 +754,24 @@ export class StarterSelectUiHandler extends MessageUiHandler {
     }
   }
 
+  /** Restores deterministic grid focus and ordering before unattended Classic starter selection. */
+  public prepareDefaultStarterSelection(cursor: number): void {
+    if (this.filterBar.openDropDown) {
+      this.filterBar.toggleDropDown(this.filterBarCursor);
+    }
+    if (this.showIvsMode) {
+      this.toggleShowIvsMode(false);
+    }
+    this.resetFilters();
+    this.updateStarters();
+    this.setFilterMode(false);
+    this.startCursorObj.setVisible(false);
+    this.randomCursorObj.setVisible(false);
+    this.partyCursorObj.setVisible(false);
+    this.cursorObj.setVisible(true);
+    this.setCursor(cursor);
+  }
+
   public override showText(
     text: string,
     delay?: number,

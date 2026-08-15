@@ -5,10 +5,7 @@ import { eventBus } from "#app/event-bus";
 import { timedEventManager } from "#app/global-event-manager";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
-import { speciesDataRegistry } from "#app/global-species-data-registry";
 import { isBeta, isDev } from "#constants/app-constants";
-import { getSplashMessages } from "#data/splash-messages";
-import type { SpeciesId } from "#enums/species-id";
 import { TextStyle } from "#enums/text-style";
 import { UiMode } from "#enums/ui-mode";
 import { version } from "#package.json";
@@ -16,17 +13,15 @@ import type { SettingsUpdateEventArgs } from "#types/event-bus-types";
 import { TimedEventDisplay } from "#ui/event-display";
 import { OptionSelectUiHandler } from "#ui/option-select-ui-handler";
 import { addTextObject } from "#ui/text";
-import { fixedInt, randInt, randItem } from "#utils/common";
+import { fixedInt, randInt } from "#utils/common";
 import i18next from "i18next";
 
 export class TitleUiHandler extends OptionSelectUiHandler {
-  /** If the stats can not be retrieved, use this fallback value */
-  private static readonly BATTLES_WON_FALLBACK: number = -1;
+  private static readonly BRAND_NAME = "PokéRogue Keagan Edition";
 
   private titleContainer: Phaser.GameObjects.Container;
   private usernameLabel: Phaser.GameObjects.Text;
   private playerCountLabel: Phaser.GameObjects.Text;
-  private splashMessage: string;
   private splashMessageText: Phaser.GameObjects.Text;
   private eventDisplay: TimedEventDisplay;
   private appVersionText: Phaser.GameObjects.Text;
@@ -130,41 +125,12 @@ export class TitleUiHandler extends OptionSelectUiHandler {
           return;
         }
         this.playerCountLabel.setText(`${stats.playerCount} ${i18next.t("menu:playersOnline")}`);
-        const splashMessage = this.splashMessage;
-        if (splashMessage === "splashMessages:battlesWon") {
-          this.splashMessageText.setText(i18next.t(splashMessage, { count: stats.battleCount }));
-        }
       })
       .catch(err => {
         if (!isDev) {
           console.error("Failed to fetch title stats:\n", err);
         }
       });
-  }
-
-  /** Used solely to display a random Pokémon name in a splash message. */
-  randomPokemon(): void {
-    const rand = randInt(1025, 1);
-    const pokemon = speciesDataRegistry.getSpecies(rand as SpeciesId);
-    const splashMessage = this.splashMessage;
-    if (
-      this.splashMessage === "splashMessages:underratedPokemon"
-      || this.splashMessage === "splashMessages:dontTalkAboutThePokemonIncident"
-      || this.splashMessage === "splashMessages:aWildPokemonAppeared"
-      || this.splashMessage === "splashMessages:aprilFools.removedPokemon"
-    ) {
-      this.splashMessageText.setText(i18next.t(splashMessage, { pokemonName: pokemon.name }));
-    }
-  }
-
-  /** Used for a specific April Fools splash message. */
-  genderSplash(): void {
-    const splashMessage = this.splashMessage;
-    if (this.splashMessage === "splashMessages:aprilFools.helloKyleAmber") {
-      const splashMessageText = this.splashMessageText;
-      const text = settings.isPlayerFemale ? "trainerNames:playerF" : "trainerNames:playerM";
-      splashMessageText.setText(i18next.t(splashMessage, { name: i18next.t(text) }));
-    }
   }
 
   show(args: any[]): boolean {
@@ -192,13 +158,7 @@ export class TitleUiHandler extends OptionSelectUiHandler {
       this.playerCountLabel.setY(UPPER_LABEL);
     }
 
-    this.splashMessage = randItem(getSplashMessages());
-    this.splashMessageText.setText(
-      i18next.t(this.splashMessage, {
-        count: TitleUiHandler.BATTLES_WON_FALLBACK,
-        cycleCountNoOrdinal: 5643853 + globalScene.gameData.gameStats.classicSessionsPlayed, // for `splashMessages:itsBeenTotalRuns`
-      }),
-    );
+    this.splashMessageText.setText(TitleUiHandler.BRAND_NAME);
 
     const betaText = isBeta || isDev ? " (Beta)" : "";
     this.appVersionText.setText("v" + version + betaText);
@@ -214,9 +174,6 @@ export class TitleUiHandler extends OptionSelectUiHandler {
     if (now.getMonth() === 11 || (now.getMonth() === 0 && now.getDate() <= 15)) {
       this.getSnow();
     }
-
-    this.randomPokemon();
-    this.genderSplash();
 
     this.updateTitleStats();
 

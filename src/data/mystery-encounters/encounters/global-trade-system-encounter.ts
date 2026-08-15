@@ -453,7 +453,7 @@ export const GlobalTradeSystemEncounter: MysteryEncounter = MysteryEncounterBuil
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.4.label`,
       buttonTooltip: `${namespace}:option.4.tooltip`,

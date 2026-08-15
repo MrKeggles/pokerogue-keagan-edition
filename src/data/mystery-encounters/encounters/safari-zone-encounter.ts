@@ -121,7 +121,7 @@ export const SafariZoneEncounter: MysteryEncounter = MysteryEncounterBuilder.wit
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,
@@ -251,6 +251,7 @@ const safariZoneGameOptions: MysteryEncounterOption[] = [
     })
     .build(),
   MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DEFAULT)
+    .withAutoplaySafeOption()
     .withDialogue({
       buttonLabel: `${namespace}:safari.4.label`,
       buttonTooltip: `${namespace}:safari.4.tooltip`,

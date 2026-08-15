@@ -1,7 +1,9 @@
+import { AutoplayController } from "#app/autoplay-controller";
 import { Button } from "#enums/buttons";
 import { MoveId } from "#enums/move-id";
 import { SpeciesId } from "#enums/species-id";
 import { UiMode } from "#enums/ui-mode";
+import type { LearnMovePhase } from "#phases/learn-move-phase";
 import { GameManager } from "#test/framework/game-manager";
 import Phaser from "phaser";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -67,6 +69,30 @@ describe("Learn Move Phase", () => {
       const expectedMove: MoveId = index === moveSlotNum ? levelMoveId : prevMoveset[index];
       expect(move.moveId).toBe(expectedMove);
     });
+  });
+
+  it("autoplay replaces a weak move instead of rejecting every fifth level-up move", async () => {
+    await game.classicMode.startBattle(SpeciesId.BULBASAUR);
+    const bulbasaur = game.field.getPlayerPokemon();
+    const previousMoves = [MoveId.SPLASH, MoveId.ABSORB, MoveId.ACID, MoveId.VINE_WHIP];
+    game.move.changeMoveset(bulbasaur, previousMoves);
+    game.move.select(MoveId.SPLASH);
+    await game.doKillOpponents();
+
+    game.onNextPrompt("LearnMovePhase", UiMode.CONFIRM, () => {
+      game.scene.ui.processInput(Button.ACTION);
+    });
+    game.onNextPrompt("LearnMovePhase", UiMode.SUMMARY, () => {
+      const controller = Object.create(AutoplayController.prototype) as {
+        handleLearnMoveSummary: (phase: LearnMovePhase) => void;
+      };
+      controller.handleLearnMoveSummary(game.scene.phaseManager.getCurrentPhase() as LearnMovePhase);
+    });
+    await game.phaseInterceptor.to("LearnMovePhase");
+
+    const learnedMove = bulbasaur.getLevelMoves({ startingLevel: 5 })[0][1];
+    expect(bulbasaur.getMoveset().map(move => move.moveId)).toContain(learnedMove);
+    expect(bulbasaur.getMoveset().map(move => move.moveId)).not.toContain(MoveId.SPLASH);
   });
 
   it("selecting the newly deleted move will reject it and keep old moveset", async () => {

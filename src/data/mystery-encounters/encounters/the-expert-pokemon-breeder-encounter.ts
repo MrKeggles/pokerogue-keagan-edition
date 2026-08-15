@@ -287,6 +287,7 @@ export const TheExpertPokemonBreederEncounter: MysteryEncounter = MysteryEncount
   .withQuery(`${namespace}:query`)
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DEFAULT)
+      .withAutoplaySafeOption()
       .withDialogue({
         buttonLabel: `${namespace}:option.1.label`,
         selected: [

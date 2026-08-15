@@ -157,7 +157,7 @@ export const UncommonBreedEncounter: MysteryEncounter = MysteryEncounterBuilder.
   .withTitle(`${namespace}:title`)
   .withDescription(`${namespace}:description`)
   .withQuery(`${namespace}:query`)
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.1.label`,
       buttonTooltip: `${namespace}:option.1.tooltip`,

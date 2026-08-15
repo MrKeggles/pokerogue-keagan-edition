@@ -1,7 +1,7 @@
 import type { BattleScene } from "#app/battle-scene";
 import { UiMode } from "#enums/ui-mode";
 import { LoginPhase } from "#phases/login-phase";
-import { TitlePhase } from "#phases/title-phase";
+import { KEAGAN_PATCH_NOTES_TEXT, TitlePhase } from "#phases/title-phase";
 import { UnavailablePhase } from "#phases/unavailable-phase";
 import { GameManager } from "#test/framework/game-manager";
 import Phaser from "phaser";
@@ -38,6 +38,12 @@ describe("Phases", () => {
       scene.phaseManager.unshiftPhase(titlePhase);
       await game.phaseInterceptor.to("TitlePhase");
       expect(scene.ui.getMode()).toBe(UiMode.TITLE);
+      const handler = scene.ui.getHandler() as unknown as {
+        getOptionsWithScroll: () => { label: string }[];
+      };
+      expect(handler.getOptionsWithScroll().map(option => option.label)).toContain("Patch Notes");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.2 PATCH NOTES");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Low team HP no longer stops AFK");
     });
   });
 

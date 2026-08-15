@@ -201,7 +201,7 @@ export const MysteriousChestEncounter: MysteryEncounter = MysteryEncounterBuilde
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

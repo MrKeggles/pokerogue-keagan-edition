@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 Pagefault Games
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Publish Keagan Edition for Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag matching package.json, for example v1.12.3"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark this as a prerelease"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-keagan-windows
+  cancel-in-progress: false
+
+jobs:
+  publish-windows:
+    if: github.repository != 'pagefaultgames/pokerogue'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      POKEROGUE_GITHUB_OWNER: ${{ github.repository_owner }}
+      POKEROGUE_GITHUB_REPO: ${{ github.event.repository.name }}
+      CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Refuse private update repositories
+        if: github.event.repository.visibility != 'public'
+        shell: pwsh
+        run: throw "Automatic updates for friends require a public GitHub repository."
+
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-deps
+
+      - name: Validate release tag and repository
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+          if ([string]$package.version -notmatch '^([0-9]+\.[0-9]+\.[0-9]+)(?:\.0)?$') {
+            throw "package.json version must be X.Y.Z or X.Y.Z.0"
+          }
+          $expectedTag = "v$($Matches[1])"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Release tag must be $expectedTag for package.json version $($package.version)."
+          }
+          if ($env:GITHUB_REPOSITORY -eq 'pagefaultgames/pokerogue') {
+            throw "This workflow must run from your own repository, not upstream PokéRogue."
+          }
+      - name: Run desktop checks
+        shell: pwsh
+        run: |
+          pnpm test:desktop
+          pnpm typecheck:js
+
+      - name: Build installer and update metadata
+        shell: pwsh
+        run: pnpm package:windows
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $releaseDir = Resolve-Path -LiteralPath release/windows
+          $assets = @(
+            Get-ChildItem -LiteralPath $releaseDir -Filter '*-nsis.exe' -File
+            Get-ChildItem -LiteralPath $releaseDir -Filter '*-nsis.exe.blockmap' -File
+            Get-ChildItem -LiteralPath $releaseDir -Filter 'latest.yml' -File
+            Get-ChildItem -LiteralPath $releaseDir -Filter '*-source.zip' -File
+          )
+          if ($assets.Count -ne 4) {
+            throw "Expected installer, blockmap, latest.yml, and source archive; found $($assets.Count) files."
+          }
+
+          $arguments = @(
+            'release', 'create', $env:RELEASE_TAG,
+            '--target', $env:GITHUB_SHA,
+            '--title', "PokéRogue Keagan Edition $env:RELEASE_TAG",
+            '--notes-file', 'PATCH_NOTES.md'
+          )
+          if ($env:IS_PRERELEASE -eq 'true') {
+            $arguments += '--prerelease'
+          } else {
+            $arguments += '--latest'
+          }
+          $arguments += $assets.FullName
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release publishing failed."
+          }
+
+      - name: Show download link
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          Write-Host "Download page: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"

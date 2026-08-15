@@ -143,6 +143,7 @@ export const AnOfferYouCantRefuseEncounter: MysteryEncounter = MysteryEncounterB
   )
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_SPECIAL)
+      .withAutoplaySafeOption()
       .withPrimaryPokemonRequirement(
         CombinationPokemonRequirement.Some(
           new MoveRequirement(EXTORTION_MOVES, true),
@@ -176,7 +177,7 @@ export const AnOfferYouCantRefuseEncounter: MysteryEncounter = MysteryEncounterB
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.3.label`,
       buttonTooltip: `${namespace}:option.3.tooltip`,

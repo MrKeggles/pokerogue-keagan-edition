@@ -19,6 +19,7 @@ import { Unlockables } from "#enums/unlockables";
 import { getBiomeKey } from "#field/arena";
 import type { Modifier } from "#modifiers/modifier";
 import { getDailyRunStarterModifiers, regenerateModifierPoolThresholds } from "#modifiers/modifier-type";
+import { version } from "#package.json";
 import { vouchers } from "#system/voucher";
 import type { OptionSelectConfig, OptionSelectItem } from "#types/ui-types";
 import { SaveSlotUiMode } from "#ui/save-slot-select-ui-handler";
@@ -26,10 +27,38 @@ import { isLocalServerConnected } from "#utils/common";
 import i18next from "i18next";
 
 const NO_SAVE_SLOT = -1;
+const AFK_HELP_LABEL = "AFK Bot Help";
+const PATCH_NOTES_LABEL = "Patch Notes";
+const PATCH_NOTES_VERSION = version.endsWith(".0") ? version.slice(0, -2) : version;
+
+export const KEAGAN_PATCH_NOTES_TEXT =
+  "POK\u00c9ROGUE KEAGAN EDITION$"
+  + `VERSION ${PATCH_NOTES_VERSION} PATCH NOTES$`
+  + "Smarter Battles\n"
+  + "Predicts the strongest enemy threat\n"
+  + "Uses real type, level, stats,\n"
+  + "accuracy, priority, and damage\n"
+  + "Handles doubles + friendly fire$"
+  + "Better Level-Up Moves\n"
+  + "Learns useful upgrades\n"
+  + "Replaces the weakest old move\n"
+  + "Keeps damage and type coverage$"
+  + "Unattended Farming\n"
+  + "Skips Lure reward choices\n"
+  + "Low team HP no longer stops AFK\n"
+  + "Tactical switching stays active\n"
+  + "Wipes restart as normal$"
+  + "Safety + Stability\n"
+  + "Avoids self-destruct attacks\n"
+  + "Move previews preserve battle RNG\n"
+  + "Saves and login survive updates$"
+  + `Install v${PATCH_NOTES_VERSION} over v1.12.1\n`
+  + "Press F8 to resume AFK.";
 
 export class TitlePhase extends Phase {
   public readonly phaseName = "TitlePhase";
   private loaded = false;
+  private lastSessionSlot = NO_SAVE_SLOT;
   // TODO: Make `end` take a `GameModes` as a parameter rather than storing it on the class itself
   public gameMode: GameModes;
 
@@ -47,6 +76,7 @@ export class TitlePhase extends Phase {
     }
 
     const lastSlot = await this.checkLastSaveSlot();
+    this.lastSessionSlot = lastSlot;
     await this.showOptions(lastSlot);
   }
 
@@ -58,11 +88,13 @@ export class TitlePhase extends Phase {
    */
   private async checkLastSaveSlot(): Promise<number> {
     if (loggedInUser == null) {
+      globalScene.sessionSlotId = NO_SAVE_SLOT;
       return NO_SAVE_SLOT;
     }
     try {
       const sessionData = await globalScene.gameData.getSession(loggedInUser.lastSessionSlot);
       if (!sessionData) {
+        globalScene.sessionSlotId = NO_SAVE_SLOT;
         return NO_SAVE_SLOT;
       }
 
@@ -75,6 +107,7 @@ export class TitlePhase extends Phase {
       return loggedInUser.lastSessionSlot;
     } catch (err) {
       console.error(err);
+      globalScene.sessionSlotId = NO_SAVE_SLOT;
       return NO_SAVE_SLOT;
     }
   }
@@ -181,6 +214,20 @@ export class TitlePhase extends Phase {
         keepOpen: true,
       },
       {
+        label: AFK_HELP_LABEL,
+        handler: () => {
+          this.showAfkHelpText();
+          return true;
+        },
+      },
+      {
+        label: PATCH_NOTES_LABEL,
+        handler: () => {
+          this.showPatchNotesText();
+          return true;
+        },
+      },
+      {
         label: i18next.t("menu:settings"),
         handler: () => {
           globalScene.ui.setOverlayMode(UiMode.SETTINGS_GENERAL);
@@ -195,6 +242,67 @@ export class TitlePhase extends Phase {
       yOffset: 47,
     };
     await globalScene.ui.setMode(UiMode.TITLE, config);
+  }
+
+  private showAfkHelpText(): void {
+    const helpText =
+      "POKÉROGUE KEAGAN EDITION$"
+      + "AFK BOT GUIDE$"
+      + "Getting Started\n"
+      + "Sign in manually first\n"
+      + "F8 at title: start/resume AFK\n"
+      + "F9: cycle safety profiles\n"
+      + "Any manual input stops AFK$"
+      + "Classic Farming\n"
+      + "Resumes an existing save\n"
+      + "Fresh party: Bulbasaur,\n"
+      + "Charmander, and Squirtle\n"
+      + "Restarts after a wipe$"
+      + "Profiles\n"
+      + "FAST_FARM runs uninterrupted\n"
+      + "and may defeat shiny Pokemon\n"
+      + "SAFE_CLIMB/BOSS_PUSH pause\n"
+      + "for shinies; low HP keeps going$"
+      + "Stats Overlay\n"
+      + "Shows runs started/ended\n"
+      + "Shows wipes + avg wave\n"
+      + "Shows total AFK time$"
+      + "Stop Rules (Optional)\n"
+      + "Stop after N runs\n"
+      + "Stop in wave range\n"
+      + "Stop on target species$"
+      + "Safety + Alerts\n"
+      + "Optional save-slot rotation\n"
+      + "Browser/webhook alerts\n"
+      + "Shiny/run-end/manual events$"
+      + "Scope\n"
+      + "Classic runs and rewards only\n"
+      + "Reward choices skip Lures\n"
+      + "Account screens stay manual.";
+
+    globalScene.ui.setMode(UiMode.MESSAGE);
+    globalScene.ui.showText(
+      helpText,
+      null,
+      () => {
+        this.showOptions(this.lastSessionSlot);
+      },
+      null,
+      true,
+    );
+  }
+
+  private showPatchNotesText(): void {
+    globalScene.ui.setMode(UiMode.MESSAGE);
+    globalScene.ui.showText(
+      KEAGAN_PATCH_NOTES_TEXT,
+      null,
+      () => {
+        this.showOptions(this.lastSessionSlot);
+      },
+      null,
+      true,
+    );
   }
 
   // TODO: Make callers actually wait for the save slot to load

@@ -164,6 +164,7 @@ export const FightOrFlightEncounter: MysteryEncounter = MysteryEncounterBuilder.
   )
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_SPECIAL)
+      .withAutoplaySafeOption()
       .withPrimaryPokemonRequirement(new MoveRequirement(STEALING_MOVES, true)) // Will set option2PrimaryName and option2PrimaryMove dialogue tokens automatically
       .withDialogue({
         buttonLabel: `${namespace}:option.2.label`,
@@ -191,7 +192,7 @@ export const FightOrFlightEncounter: MysteryEncounter = MysteryEncounterBuilder.
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.3.label`,
       buttonTooltip: `${namespace}:option.3.tooltip`,

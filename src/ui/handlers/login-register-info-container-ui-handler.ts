@@ -30,6 +30,10 @@ const MAX_SAVES_FOR_USERNAME_PANEL = 7;
 
 const ERR_NO_SAVES: string = "No save files found";
 const ERR_TOO_MANY_SAVES: string = "Too many save files found";
+const ERR_USERNAME: string = "invalid username";
+const ERR_PASSWORD: string = "invalid password";
+const ERR_ACCOUNT_EXIST: string = "account doesn't exist";
+const ERR_PASSWORD_MATCH: string = "password doesn't match";
 
 export abstract class LoginRegisterInfoContainerUiHandler extends FormModalUiHandler {
   private usernameInfoImage: Phaser.GameObjects.Image;
@@ -43,16 +47,27 @@ export abstract class LoginRegisterInfoContainerUiHandler extends FormModalUiHan
       return "";
     }
 
-    const colonIndex = error.indexOf(":");
-    if (colonIndex > 0) {
-      error = error.slice(0, colonIndex);
+    if (/^(?:NET|CF)\d{2}:/.test(error)) {
+      return error;
     }
 
-    switch (error) {
+    // The API can append diagnostic detail after a known server error code.
+    // Match only those codes so actionable NETxx/CFxx messages remain intact.
+    const errorCode = error.split(":", 1)[0];
+
+    switch (errorCode) {
       case ERR_NO_SAVES:
         return "P01: " + i18next.t("menu:noSaves");
       case ERR_TOO_MANY_SAVES:
         return "P02: " + i18next.t("menu:tooManySaves");
+      case ERR_USERNAME:
+        return i18next.t("menu:invalidLoginUsername");
+      case ERR_PASSWORD:
+        return i18next.t("menu:invalidLoginPassword");
+      case ERR_ACCOUNT_EXIST:
+        return i18next.t("menu:accountNonExistent");
+      case ERR_PASSWORD_MATCH:
+        return i18next.t("menu:unmatchingPassword");
     }
 
     return super.getReadableErrorMessage(error);

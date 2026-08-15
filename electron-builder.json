@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "net.pokerogue.keagan",
+  "productName": "PokéRogue Keagan Edition",
+  "directories": {
+    "output": "release/windows"
+  },
+  "asar": true,
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
+  "buildDependenciesFromSource": false,
+  "extraMetadata": {
+    "main": "electron/main.cjs",
+    "dependencies": {
+      "electron-updater": "6.8.9"
+    },
+    "license": "AGPL-3.0-only",
+    "homepage": "https://pokerogue.net"
+  },
+  "files": [
+    {
+      "from": "dist",
+      "to": "dist",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "electron",
+      "to": "electron",
+      "filter": ["**/*", "!**/*.test.cjs"]
+    },
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "LICENSE",
+      "to": "LICENSE"
+    },
+    {
+      "from": "LICENSES",
+      "to": "LICENSES",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "README.md",
+      "to": "README.md"
+    },
+    {
+      "from": "docs/distribution-notice.md",
+      "to": "DISTRIBUTION-NOTICE.md"
+    },
+    {
+      "from": "PATCH_NOTES.md",
+      "to": "PATCH_NOTES.md"
+    }
+  ],
+  "win": {
+    "icon": "assets/logo512.png",
+    "executableName": "PokeRogue-Keagan-Edition",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "artifactName": "PokeRogue-Keagan-Edition-${version}-nsis.${ext}",
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "PokéRogue Keagan Edition"
+  },
+  "portable": {
+    "artifactName": "PokeRogue-Keagan-Edition-${version}-portable.${ext}"
+  }
+}

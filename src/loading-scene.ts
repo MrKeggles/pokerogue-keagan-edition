@@ -18,6 +18,7 @@ export class LoadingScene extends SceneBase {
   public static readonly KEY = "loading";
 
   readonly LOAD_EVENTS = Phaser.Loader.Events;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
     super(LoadingScene.KEY);
@@ -367,7 +368,7 @@ export class LoadingScene extends SceneBase {
 
     this.loadLoadingScreen();
 
-    initializeGame();
+    this.initializationPromise = initializeGame();
   }
 
   private loadLoadingScreen() {
@@ -532,6 +533,7 @@ export class LoadingScene extends SceneBase {
 
   async create() {
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.handleDestroy());
+    await this.initializationPromise;
     this.scene.start("battle");
   }
 

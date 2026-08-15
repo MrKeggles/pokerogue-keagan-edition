@@ -17,6 +17,9 @@ on:
     types: [checks_requested]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -27,6 +30,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       all: ${{ steps.filter.outputs.all }}
@@ -34,6 +38,8 @@ jobs:
       js-files: ${{ steps.filter.outputs.js-files }}
       github-scripts: ${{ steps.filter.outputs.github-scripts }}
       local-scripts: ${{ steps.filter.outputs.local-scripts }}
+      desktop-files: ${{ steps.filter.outputs.desktop-files }}
+      website-files: ${{ steps.filter.outputs.website-files }}
     steps:
       - name: Checkout GitHub repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # 7.0.0
@@ -64,7 +70,9 @@ jobs:
           needs.linting-path-filter.outputs.ts-files == 'true' ||
           needs.linting-path-filter.outputs.js-files == 'true' ||
           needs.linting-path-filter.outputs.github-scripts == 'true' ||
-          needs.linting-path-filter.outputs.local-scripts == 'true'
+          needs.linting-path-filter.outputs.local-scripts == 'true' ||
+          needs.linting-path-filter.outputs.desktop-files == 'true' ||
+          needs.linting-path-filter.outputs.website-files == 'true'
 
       # Lint files with Biome-Lint - https://biomejs.dev/linter/
       - name: Lint with Biome
@@ -74,7 +82,9 @@ jobs:
             (
               needs.linting-path-filter.outputs.all == 'true' ||
               needs.linting-path-filter.outputs.ts-files == 'true' ||
-              needs.linting-path-filter.outputs.js-files == 'true'
+              needs.linting-path-filter.outputs.js-files == 'true' ||
+              needs.linting-path-filter.outputs.desktop-files == 'true' ||
+              needs.linting-path-filter.outputs.website-files == 'true'
             ) }}
 
       # Validate dependencies with dependency-cruiser - https://github.com/sverweij/dependency-cruiser
@@ -104,9 +114,75 @@ jobs:
       - name: Run Typecheck (JS files)
         run: pnpm typecheck:js
         id: typecheck-js
-        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.js-files == 'true') }}
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.js-files == 'true' || needs.linting-path-filter.outputs.desktop-files == 'true') }}
+
+      - name: Run Desktop Protocol Tests
+        run: pnpm test:desktop
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.desktop-files == 'true') }}
+
+      - name: Test Keagan Edition landing site
+        run: pnpm site:test
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.website-files == 'true') }}
+
+      - name: Build Keagan Edition landing site
+        run: pnpm site:build
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.website-files == 'true') }}
+
+      - name: Build Desktop App
+        run: pnpm build:app
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.ts-files == 'true' || needs.linting-path-filter.outputs.desktop-files == 'true') }}
+
+      - name: Run Type Tests
+        run: pnpm test:types
+        id: type-tests
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.ts-files == 'true') }}
+
+      - name: Validate PowerShell packaging scripts
+        shell: pwsh
+        run: |
+          $parseFailed = $false
+          Get-ChildItem -Path scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+
+            foreach ($parseError in $errors) {
+              Write-Error "$($_.FullName):$($parseError.Extent.StartLineNumber): $($parseError.Message)"
+              $parseFailed = $true
+            }
+          }
+
+          if ($parseFailed) {
+            throw "PowerShell packaging script validation failed."
+          }
+        if: ${{ !cancelled() && (needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.desktop-files == 'true') }}
 
       - name: Check for REUSE compliance
         id: reuse-lint
-        uses: fsfe/reuse-action@v5
+        uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6
         if: ${{ !cancelled() }}
+
+  desktop-package:
+    name: Assemble Windows desktop app
+    timeout-minutes: 20
+    runs-on: windows-latest
+    needs: linting-path-filter
+    if: ${{ needs.linting-path-filter.outputs.all == 'true' || needs.linting-path-filter.outputs.desktop-files == 'true' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # 7.0.0
+        with:
+          submodules: "recursive"
+
+      - uses: ./.github/actions/setup-deps
+
+      - name: Build and assemble unpacked Windows app
+        shell: pwsh
+        run: ./scripts/package-exe.ps1 -UnpackedOnly

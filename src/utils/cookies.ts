@@ -1,15 +1,37 @@
-import { isBeta } from "#constants/app-constants";
+import { isApp, isBeta } from "#constants/app-constants";
 
 // 90 days
 const COOKIE_EXPIRATION_BUFFER = 3600000 * 24 * 30 * 3;
+const DESKTOP_COOKIE_PREFIX = "pokerogue.desktop.cookie.";
+
+function getDesktopCookieKey(cName: string): string {
+  return `${DESKTOP_COOKIE_PREFIX}${cName}`;
+}
 
 export function setCookie(cName: string, cValue: string): void {
+  if (isApp) {
+    try {
+      localStorage.setItem(getDesktopCookieKey(cName), cValue);
+      return;
+    } catch {
+      // Fall back to Chromium's cookie store if desktop storage is unavailable.
+    }
+  }
+
   const expiration = new Date();
   expiration.setTime(Date.now() + COOKIE_EXPIRATION_BUFFER);
   document.cookie = `${cName}=${cValue};Secure;SameSite=Strict;Domain=${window.location.hostname};Path=/;Expires=${expiration.toUTCString()}`;
 }
 
 export function removeCookie(cName: string): void {
+  if (isApp) {
+    try {
+      localStorage.removeItem(getDesktopCookieKey(cName));
+    } catch {
+      // Continue clearing any cookie-store fallback below.
+    }
+  }
+
   if (isBeta) {
     document.cookie = `${cName}=;Secure;SameSite=Strict;Domain=pokerogue.net;Path=/;Max-Age=-1`; // we need to remove the cookie from the main domain as well
   }
@@ -19,6 +41,17 @@ export function removeCookie(cName: string): void {
 }
 
 export function getCookie(cName: string): string {
+  if (isApp) {
+    try {
+      const desktopCookie = localStorage.getItem(getDesktopCookieKey(cName));
+      if (desktopCookie !== null) {
+        return desktopCookie;
+      }
+    } catch {
+      // Fall back to Chromium's cookie store if desktop storage is unavailable.
+    }
+  }
+
   // check if there are multiple cookies with the same name and delete them
   if (document.cookie.split(";").filter(c => c.trim().includes(cName)).length > 1) {
     removeCookie(cName);

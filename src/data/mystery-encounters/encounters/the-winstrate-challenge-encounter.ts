@@ -130,7 +130,7 @@ export const TheWinstrateChallengeEncounter: MysteryEncounter = MysteryEncounter
       await spawnNextTrainerOrEndEncounter();
     },
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

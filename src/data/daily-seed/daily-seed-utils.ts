@@ -12,18 +12,7 @@ import type { Starter, StarterMoveset } from "#types/save-data";
 import { isBetween } from "#utils/common";
 import { getEnumValues } from "#utils/enums";
 import { getPokemonSpeciesForm } from "#utils/pokemon-utils";
-import Ajv from "ajv";
-import customDailyRunSchema from "./schema.json";
-
-// TODO: move to a common utils file if or when needed elsewhere
-const ajv = new Ajv({
-  allErrors: true,
-});
-
-/**
- * The validator for the {@linkcode CustomDailyRunConfig}.
- */
-const validate = ajv.compile(customDailyRunSchema);
+import { validateDailySeedSchema } from "./schema-validator.generated";
 
 /**
  * If this is Daily Mode and the seed can be parsed into json it is a Daily Event Seed.
@@ -43,9 +32,9 @@ export function parseDailySeed(seed: string): CustomDailyRunConfig | undefined {
   try {
     const config = JSON.parse(seed) as CustomDailyRunConfig;
 
-    if (!validate(config)) {
+    if (!validateDailySeedSchema(config)) {
       if (isBeta || isDev) {
-        console.warn("Invalid custom daily run config:", validate.errors);
+        console.warn("Invalid custom daily run config:", validateDailySeedSchema.errors);
       }
       return;
     }

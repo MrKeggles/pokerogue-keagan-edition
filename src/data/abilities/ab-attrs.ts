@@ -543,9 +543,11 @@ export class FullHpResistTypeAbAttr extends PreDefendAbAttr {
     );
   }
 
-  override apply({ typeMultiplier, pokemon }: TypeMultiplierAbAttrParams): void {
+  override apply({ typeMultiplier, pokemon, simulated }: TypeMultiplierAbAttrParams): void {
     typeMultiplier.value = 0.5;
-    pokemon.turnData.moveEffectiveness = 0.5;
+    if (!simulated) {
+      pokemon.turnData.moveEffectiveness = 0.5;
+    }
   }
 
   getTriggerMessage({ pokemon }: TypeMultiplierAbAttrParams, _abilityName: string): string {
@@ -5443,11 +5445,10 @@ export class FormBlockDamageAbAttr extends ReceivedMoveDamageMultiplierAbAttr {
   }
 
   override apply({ pokemon, simulated, damage }: PreDefendModifyDamageAbAttrParams): void {
+    damage.value = 0;
     if (simulated) {
       return;
     }
-
-    damage.value = 0;
     if (this.recoil > 0) {
       pokemon.damageAndUpdate(toDmgValue(pokemon.getMaxHp() * this.recoil), {
         result: HitResult.INDIRECT,

@@ -232,7 +232,7 @@ export const ThePokemonSalesmanEncounter: MysteryEncounter = MysteryEncounterBui
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

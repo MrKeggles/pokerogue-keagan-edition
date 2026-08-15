@@ -2670,7 +2670,7 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
       applyAbAttrs("FullHpResistTypeAbAttr", commonAbAttrParams);
     }
 
-    if (move.category === MoveCategory.STATUS && move.hitsSubstitute(source, this)) {
+    if (move.category === MoveCategory.STATUS && move.hitsSubstitute(source, this, simulated)) {
       typeMultiplier.value = 0;
     }
 
@@ -3395,9 +3395,10 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
    *
    * @param target - The target Pokémon against which the move is used.
    * @param sourceMove - The move being used by the user.
+   * @param simulated - Whether ability effects should be evaluated without recording a real activation.
    * @returns The calculated accuracy multiplier.
    */
-  getAccuracyMultiplier(target: Pokemon, sourceMove: Move): number {
+  getAccuracyMultiplier(target: Pokemon, sourceMove: Move, simulated = false): number {
     const isOhko = sourceMove.hasAttr("OneHitKOAccuracyAttr");
     if (isOhko) {
       return 1;
@@ -3409,9 +3410,18 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
     const ignoreAccStatStage = new BooleanHolder(false);
     const ignoreEvaStatStage = new BooleanHolder(false);
 
-    // TODO: consider refactoring this method to accept `simulated` and then pass simulated to these applyAbAttrs
-    applyAbAttrs("IgnoreOpponentStatStagesAbAttr", { pokemon: target, stat: Stat.ACC, ignored: ignoreAccStatStage });
-    applyAbAttrs("IgnoreOpponentStatStagesAbAttr", { pokemon: this, stat: Stat.EVA, ignored: ignoreEvaStatStage });
+    applyAbAttrs("IgnoreOpponentStatStagesAbAttr", {
+      pokemon: target,
+      stat: Stat.ACC,
+      ignored: ignoreAccStatStage,
+      simulated,
+    });
+    applyAbAttrs("IgnoreOpponentStatStagesAbAttr", {
+      pokemon: this,
+      stat: Stat.EVA,
+      ignored: ignoreEvaStatStage,
+      simulated,
+    });
     applyMoveAttrs("IgnoreOpponentStatStagesAttr", this, target, sourceMove, ignoreEvaStatStage);
 
     globalScene.applyModifiers(TempStatStageBoosterModifier, this.isPlayer(), Stat.ACC, userAccStage);
@@ -3436,6 +3446,7 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
       stat: Stat.ACC,
       statVal: accuracyMultiplier,
       move: sourceMove,
+      simulated,
     });
 
     const evasionMultiplier = new NumberHolder(1);
@@ -3444,6 +3455,7 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
       stat: Stat.EVA,
       statVal: evasionMultiplier,
       move: sourceMove,
+      simulated,
     });
 
     const ally = this.getAlly();
@@ -3456,6 +3468,7 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
         statVal: accuracyMultiplier,
         ignoreAbility: ignore,
         move: sourceMove,
+        simulated,
       });
 
       applyAbAttrs("AllyStatMultiplierAbAttr", {
@@ -3464,6 +3477,7 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
         statVal: evasionMultiplier,
         ignoreAbility: ignore,
         move: sourceMove,
+        simulated,
       });
     }
 

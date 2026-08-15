@@ -146,6 +146,7 @@ export const DelibirdyEncounter: MysteryEncounter = MysteryEncounterBuilder.with
   })
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_DEFAULT)
+      .withAutoplaySafeOption()
       .withSceneMoneyRequirement(0, DELIBIRDY_MONEY_PRICE_MULTIPLIER) // Must have money to spawn
       .withDialogue({
         buttonLabel: `${namespace}:option.1.label`,

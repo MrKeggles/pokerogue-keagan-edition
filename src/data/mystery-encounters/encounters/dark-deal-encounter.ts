@@ -208,7 +208,7 @@ export const DarkDealEncounter: MysteryEncounter = MysteryEncounterBuilder.withE
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

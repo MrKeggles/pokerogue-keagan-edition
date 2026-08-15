@@ -17,6 +17,11 @@ import { randSeedInt } from "#utils/common";
 // biome-ignore lint/suspicious/noConfusingVoidType: void unions in callbacks are OK
 export type OptionPhaseCallback = () => Promise<void | boolean>;
 
+export enum MysteryEncounterAutoplayPolicy {
+  REQUIRE_REVIEW,
+  SAFE,
+}
+
 /**
  * Used by {@linkcode MysteryEncounterOptionBuilder} class to define required/optional properties on the {@linkcode MysteryEncounterOption} class when building.
  *
@@ -25,6 +30,7 @@ export type OptionPhaseCallback = () => Promise<void | boolean>;
  */
 export interface IMysteryEncounterOption {
   optionMode: MysteryEncounterOptionMode;
+  autoplayPolicy: MysteryEncounterAutoplayPolicy;
   hasDexProgress: boolean;
   requirements: EncounterSceneRequirement[];
   primaryPokemonRequirements: EncounterPokemonRequirement[];
@@ -40,6 +46,7 @@ export interface IMysteryEncounterOption {
 
 export class MysteryEncounterOption implements IMysteryEncounterOption {
   optionMode: MysteryEncounterOptionMode;
+  autoplayPolicy: MysteryEncounterAutoplayPolicy;
   hasDexProgress: boolean;
   requirements: EncounterSceneRequirement[];
   primaryPokemonRequirements: EncounterPokemonRequirement[];
@@ -65,6 +72,7 @@ export class MysteryEncounterOption implements IMysteryEncounterOption {
     if (option != null) {
       Object.assign(this, option);
     }
+    this.autoplayPolicy = this.autoplayPolicy ?? MysteryEncounterAutoplayPolicy.REQUIRE_REVIEW;
     this.hasDexProgress = this.hasDexProgress ?? false;
     this.requirements = this.requirements ?? [];
     this.primaryPokemonRequirements = this.primaryPokemonRequirements ?? [];
@@ -196,6 +204,7 @@ export class MysteryEncounterOption implements IMysteryEncounterOption {
 
 export class MysteryEncounterOptionBuilder implements Partial<IMysteryEncounterOption> {
   optionMode: MysteryEncounterOptionMode = MysteryEncounterOptionMode.DEFAULT;
+  autoplayPolicy = MysteryEncounterAutoplayPolicy.REQUIRE_REVIEW;
   requirements: EncounterSceneRequirement[] = [];
   primaryPokemonRequirements: EncounterPokemonRequirement[] = [];
   secondaryPokemonRequirements: EncounterPokemonRequirement[] = [];
@@ -212,6 +221,11 @@ export class MysteryEncounterOptionBuilder implements Partial<IMysteryEncounterO
 
   withHasDexProgress(hasDexProgress: boolean): this & Required<Pick<IMysteryEncounterOption, "hasDexProgress">> {
     return Object.assign(this, { hasDexProgress });
+  }
+
+  /** Marks this exact option as reviewed for unattended selection. */
+  withAutoplaySafeOption(): this & Required<Pick<IMysteryEncounterOption, "autoplayPolicy">> {
+    return Object.assign(this, { autoplayPolicy: MysteryEncounterAutoplayPolicy.SAFE });
   }
 
   /**

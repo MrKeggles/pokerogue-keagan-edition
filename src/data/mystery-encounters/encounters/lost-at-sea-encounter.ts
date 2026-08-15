@@ -60,6 +60,7 @@ export const LostAtSeaEncounter: MysteryEncounter = MysteryEncounterBuilder.with
   .withOption(
     // Option 1: Use a (non fainted) pokemon that can learn Surf to guide you back/
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_DEFAULT)
+      .withAutoplaySafeOption()
       .withPokemonCanLearnMoveRequirement(OPTION_1_REQUIRED_MOVE)
       .withDialogue({
         buttonLabel: `${namespace}:option.1.label`,
@@ -78,6 +79,7 @@ export const LostAtSeaEncounter: MysteryEncounter = MysteryEncounterBuilder.with
   .withOption(
     //Option 2: Use a (non fainted) pokemon that can learn fly to guide you back.
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_DEFAULT)
+      .withAutoplaySafeOption()
       .withPokemonCanLearnMoveRequirement(OPTION_2_REQUIRED_MOVE)
       .withDialogue({
         buttonLabel: `${namespace}:option.2.label`,
@@ -93,7 +95,7 @@ export const LostAtSeaEncounter: MysteryEncounter = MysteryEncounterBuilder.with
       .withOptionPhase(async () => handlePokemonGuidingYouPhase())
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     // Option 3: Wander aimlessly
     {
       buttonLabel: `${namespace}:option.3.label`,

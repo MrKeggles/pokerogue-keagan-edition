@@ -173,7 +173,7 @@ export const ATrainersTestEncounter: MysteryEncounter = MysteryEncounterBuilder.
       await initBattleWithEnemyConfig(config);
     },
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

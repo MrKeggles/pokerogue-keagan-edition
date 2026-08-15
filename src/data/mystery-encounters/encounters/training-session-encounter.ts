@@ -355,7 +355,7 @@ export const TrainingSessionEncounter: MysteryEncounter = MysteryEncounterBuilde
       })
       .build(),
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.4.label`,
       buttonTooltip: `${namespace}:option.4.tooltip`,

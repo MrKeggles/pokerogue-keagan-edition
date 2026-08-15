@@ -32,11 +32,8 @@ export class RegistrationFormUiHandler extends LoginRegisterInfoContainerUiHandl
   }
 
   public override getReadableErrorMessage(error: string): string {
-    const colonIndex = error?.indexOf(":");
-    if (colonIndex > 0) {
-      error = error.slice(0, colonIndex);
-    }
-    switch (error) {
+    const errorCode = error?.split(":", 1)[0] ?? "";
+    switch (errorCode) {
       case "invalid username":
         return i18next.t("menu:invalidRegisterUsername");
       case "invalid password":

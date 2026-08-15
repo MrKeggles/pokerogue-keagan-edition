@@ -67,6 +67,7 @@ export const FieldTripEncounter: MysteryEncounter = MysteryEncounterBuilder.with
   .withQuery(`${namespace}:query`)
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DEFAULT)
+      .withAutoplaySafeOption()
       .withDialogue({
         buttonLabel: `${namespace}:option.1.label`,
         buttonTooltip: `${namespace}:option.1.tooltip`,

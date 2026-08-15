@@ -8,7 +8,10 @@ import { TextStyle } from "#enums/text-style";
 import { UiMode } from "#enums/ui-mode";
 import { getEncounterText } from "#mystery-encounters/encounter-dialogue-utils";
 import type { OptionSelectSettings } from "#mystery-encounters/encounter-phase-utils";
-import type { MysteryEncounterOption } from "#mystery-encounters/mystery-encounter-option";
+import {
+  MysteryEncounterAutoplayPolicy,
+  type MysteryEncounterOption,
+} from "#mystery-encounters/mystery-encounter-option";
 import type { MysteryEncounterPhase } from "#phases/mystery-encounter-phases";
 import { addBBCodeTextObject, getBBCodeFrag } from "#ui/text";
 import { UiHandler } from "#ui/ui-handler";
@@ -16,6 +19,44 @@ import { addWindow, WindowVariant } from "#ui/ui-theme";
 import { fixedInt } from "#utils/common";
 import i18next from "i18next";
 import type BBCodeText from "phaser3-rex-plugins/plugins/bbcodetext";
+
+export function findFirstEnabledMysteryOptionIndex(
+  optionModes: readonly MysteryEncounterOptionMode[],
+  optionsMeetRequirements: readonly boolean[],
+): number | null {
+  for (let index = 0; index < optionModes.length; index++) {
+    const optionMode = optionModes[index];
+    const isExplicitlyDisabled =
+      !optionsMeetRequirements[index]
+      && (optionMode === MysteryEncounterOptionMode.DISABLED_OR_DEFAULT
+        || optionMode === MysteryEncounterOptionMode.DISABLED_OR_SPECIAL);
+    if (!isExplicitlyDisabled) {
+      return index;
+    }
+  }
+  return null;
+}
+
+export function findFirstAutoplaySafeMysteryOptionIndex(
+  optionModes: readonly MysteryEncounterOptionMode[],
+  optionsMeetRequirements: readonly boolean[],
+  autoplayPolicies: readonly MysteryEncounterAutoplayPolicy[],
+): number | null {
+  for (let index = 0; index < optionModes.length; index++) {
+    if (autoplayPolicies[index] !== MysteryEncounterAutoplayPolicy.SAFE) {
+      continue;
+    }
+    const optionMode = optionModes[index];
+    const isExplicitlyDisabled =
+      !optionsMeetRequirements[index]
+      && (optionMode === MysteryEncounterOptionMode.DISABLED_OR_DEFAULT
+        || optionMode === MysteryEncounterOptionMode.DISABLED_OR_SPECIAL);
+    if (!isExplicitlyDisabled) {
+      return index;
+    }
+  }
+  return null;
+}
 
 export class MysteryEncounterUiHandler extends UiHandler {
   private cursorContainer: Phaser.GameObjects.Container;
@@ -187,6 +228,23 @@ export class MysteryEncounterUiHandler extends UiHandler {
     }
 
     return success;
+  }
+
+  /** Returns the first encounter choice the UI would currently accept, excluding the View Party button. */
+  public getFirstEnabledOptionIndex(): number | null {
+    return findFirstEnabledMysteryOptionIndex(
+      this.encounterOptions.map(option => option.optionMode),
+      this.optionsMeetsReqs,
+    );
+  }
+
+  /** Returns the first currently available option explicitly reviewed for unattended play. */
+  public getFirstAutoplaySafeOptionIndex(): number | null {
+    return findFirstAutoplaySafeMysteryOptionIndex(
+      this.encounterOptions.map(option => option.optionMode),
+      this.optionsMeetsReqs,
+      this.encounterOptions.map(option => option.autoplayPolicy),
+    );
   }
 
   private handleTwoOptionMoveInput(button: Button): boolean {

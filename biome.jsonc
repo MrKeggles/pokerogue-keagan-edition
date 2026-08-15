@@ -42,8 +42,11 @@
       "!!coverage",
       "!!dist*",
       "!!docs",
+      "!!.edge-smoke-profile*",
       "!!locales",
+      "!!release",
       "!!typedoc",
+      "!package-lock.json",
       // TODO: lint css and html?
       "!!*.css",
       "!!*.html",

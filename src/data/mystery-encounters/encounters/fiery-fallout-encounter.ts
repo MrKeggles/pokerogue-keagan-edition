@@ -178,7 +178,7 @@ export const FieryFalloutEncounter: MysteryEncounter = MysteryEncounterBuilder.w
   .withTitle(`${namespace}:title`)
   .withDescription(`${namespace}:description`)
   .withQuery(`${namespace}:query`)
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.1.label`,
       buttonTooltip: `${namespace}:option.1.tooltip`,
@@ -258,6 +258,7 @@ export const FieryFalloutEncounter: MysteryEncounter = MysteryEncounterBuilder.w
   )
   .withOption(
     MysteryEncounterOptionBuilder.newOptionWithMode(MysteryEncounterOptionMode.DISABLED_OR_SPECIAL)
+      .withAutoplaySafeOption()
       .withPrimaryPokemonRequirement(
         CombinationPokemonRequirement.Some(
           new TypeRequirement(PokemonType.FIRE, true, 1),

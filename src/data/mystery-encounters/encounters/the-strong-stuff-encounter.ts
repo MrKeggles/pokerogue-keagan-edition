@@ -193,7 +193,7 @@ export const TheStrongStuffEncounter: MysteryEncounter = MysteryEncounterBuilder
       return true;
     },
   )
-  .withSimpleOption(
+  .withSimpleAutoplaySafeOption(
     {
       buttonLabel: `${namespace}:option.2.label`,
       buttonTooltip: `${namespace}:option.2.tooltip`,

@@ -626,10 +626,11 @@ export class MenuUiHandler extends MessageUiHandler {
                 handler: () => {
                   if (loggedInUser?.discordId === "") {
                     const token = getCookie(sessionIdKey);
-                    const redirectUri = encodeURIComponent(`${import.meta.env.VITE_SERVER_URL}/auth/discord/callback`);
+                    const oauthServerUrl = isApp ? "https://api.pokerogue.net" : import.meta.env.VITE_SERVER_URL;
+                    const redirectUri = encodeURIComponent(`${oauthServerUrl}/auth/discord/callback`);
                     const discordId = import.meta.env.VITE_DISCORD_CLIENT_ID;
                     const discordUrl = `https://discord.com/api/oauth2/authorize?client_id=${discordId}&redirect_uri=${redirectUri}&response_type=code&scope=identify&state=${token}&prompt=none`;
-                    window.open(discordUrl, "_self");
+                    window.open(discordUrl, isApp ? "_blank" : "_self");
                     return true;
                   }
                   pokerogueApi.unlinkDiscord().then(_isSuccess => {
@@ -646,10 +647,11 @@ export class MenuUiHandler extends MessageUiHandler {
                 handler: () => {
                   if (loggedInUser?.googleId === "") {
                     const token = getCookie(sessionIdKey);
-                    const redirectUri = encodeURIComponent(`${import.meta.env.VITE_SERVER_URL}/auth/google/callback`);
+                    const oauthServerUrl = isApp ? "https://api.pokerogue.net" : import.meta.env.VITE_SERVER_URL;
+                    const redirectUri = encodeURIComponent(`${oauthServerUrl}/auth/google/callback`);
                     const googleId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
                     const googleUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${googleId}&response_type=code&redirect_uri=${redirectUri}&scope=openid&state=${token}`;
-                    window.open(googleUrl, "_self");
+                    window.open(googleUrl, isApp ? "_blank" : "_self");
                     return true;
                   }
                   pokerogueApi.unlinkGoogle().then(_isSuccess => {

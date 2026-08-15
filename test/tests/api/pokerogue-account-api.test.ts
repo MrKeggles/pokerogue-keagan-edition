@@ -85,12 +85,12 @@ describe("Pokerogue Account API", () => {
       expect(error).toBe("Username is already taken");
     });
 
-    it('should return "Unknown registration error!" and report a warning on ERROR', async () => {
+    it("should return a detailed network error and report a warning on ERROR", async () => {
       server.use(http.post(`${apiBase}/account/register`, () => HttpResponse.error()));
 
       const error = await accountApi.register(registerParams);
 
-      expect(error).toBe("Unknown registration error!");
+      expect(error).toBe("NET01: Registration failed to reach the API (Failed to fetch)");
       expect(console.warn).toHaveBeenCalledWith("Register failed!", expect.any(Error));
     });
   });
@@ -119,13 +119,41 @@ describe("Pokerogue Account API", () => {
       expect(console.warn).toHaveBeenCalledWith("Login failed!", 401, "Unauthorized");
     });
 
-    it('should return "Unknown login error!" and report a warning on ERROR', async () => {
+    it("should return a detailed network error and report a warning on ERROR", async () => {
       server.use(http.post(`${apiBase}/account/login`, () => HttpResponse.error()));
 
       const error = await accountApi.login(loginParams);
 
-      expect(error).toBe("Unknown login error!");
+      expect(error).toBe("NET01: Login failed to reach the API (Failed to fetch)");
       expect(console.warn).toHaveBeenCalledWith("Login failed!", expect.any(Error));
+    });
+
+    it("should identify a Cloudflare challenge response", async () => {
+      server.use(
+        http.post(
+          `${apiBase}/account/login`,
+          () => new HttpResponse("<!doctype html><title>Attention Required | Cloudflare</title>", { status: 403 }),
+        ),
+      );
+
+      const error = await accountApi.login(loginParams);
+
+      expect(error).toBe(
+        "CF01: Account requests are being blocked by Cloudflare in this desktop build. Use the browser version for register/login for now.",
+      );
+    });
+
+    it("should preserve a desktop proxy network error code", async () => {
+      server.use(
+        http.post(
+          `${apiBase}/account/login`,
+          () => new HttpResponse("NET01: The PokeRogue API could not be reached.", { status: 502 }),
+        ),
+      );
+
+      const error = await accountApi.login(loginParams);
+
+      expect(error).toBe("NET01: The PokeRogue API could not be reached.");
     });
   });
 

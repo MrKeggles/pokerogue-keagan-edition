@@ -8,14 +8,19 @@ all:
   - "src/**/!(*.{md,py,sh,gitkeep,gitignore})"
   - "test/**/!(*.{md,py,sh,gitkeep,gitignore})"
   - "assets/**/!(*.{md,py,sh,gitkeep,gitignore})"
+  - "electron/**/*.cjs"
+  - "scripts/**/*.ps1"
   # Workflows that can impact tests
   - ".github/workflows/test*.yml"
   - ".github/test-filters.yml"
   # top-level files
   - "package.json"
   - "pnpm-lock.yaml"
-  - ".nvrmc" # Updates to node version can break tests
+  - "pnpm-workspace.yaml"
+  - ".nvmrc" # Updates to node version can break tests
+  - "electron-builder.json"
   - "vite*" # vite.config.ts, vite.vitest.config.ts, vitest.workspace.ts
   - "tsconfig.json" # tsconfig.json tweaking can impact compilation
+  - "jsconfig.json"
   - "global.d.ts"
   - ".env*"

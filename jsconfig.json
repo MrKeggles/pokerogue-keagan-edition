@@ -6,8 +6,18 @@
  */
 {
   // these are files that cannot be converted to TS files, and so are covered by this jsconfig file
-  "include": [".dependency-cruiser.cjs", "typedoc.config.js", "assets/service-worker.js", "plugins/typedoc/**/*.js"],
-  "exclude": ["assets", "dist", "node_modules", "typedoc"],
+  "include": [
+    ".dependency-cruiser.cjs",
+    "typedoc.config.js",
+    "assets/service-worker.js",
+    "electron/**/*.cjs",
+    "scripts/**/*.cjs",
+    "website/**/*.js",
+    "website/**/*.cjs",
+    "website/**/*.mjs",
+    "plugins/typedoc/**/*.js"
+  ],
+  "exclude": ["assets", "dist", "node_modules", "release", "typedoc"],
   "compilerOptions": {
     "target": "esnext",
     "module": "nodenext",

@@ -8,10 +8,15 @@ onlyBuiltDependencies:
   - vite-node
 
 overrides:
+  '@actions/github@9.1.1>undici': '8.9.0'
+  '@actions/http-client@3.0.2>undici': '8.9.0'
+  '@actions/http-client@4.0.1>undici': '8.9.0'
+  'ajv@8.20.0>fast-uri': '4.1.2'
   ajv@>=7.0.0-alpha.0 <8.18.0: '>=8.18.0'
   brace-expansion@>=4.0.0 <5.0.5: '>=5.0.5'
   fast-uri@<=3.1.0: '>=3.1.2'
   i18next-http-backend@<3.0.5: '>=3.0.5'
+  js-yaml@>=4.0.0 <4.3.1: '4.3.1'
   lodash@<=4.17.23: '>=4.18.0'
   markdown-it@>=13.0.0 <14.1.1: '>=14.1.1'
   minimatch@<10.2.1: '>=10.2.1'

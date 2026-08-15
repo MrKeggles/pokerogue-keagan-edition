@@ -508,6 +508,16 @@ export class Battle {
     return ret;
   }
 
+  /** Captures the current deterministic battle RNG state for a read-only simulation. */
+  captureSeedState(): string | null {
+    return this.battleSeedState;
+  }
+
+  /** Restores a battle RNG state captured before a read-only simulation. */
+  restoreSeedState(state: string | null): void {
+    this.battleSeedState = state;
+  }
+
   /**
    * Returns if the battle is of type {@linkcode BattleType.MYSTERY_ENCOUNTER}
    */
