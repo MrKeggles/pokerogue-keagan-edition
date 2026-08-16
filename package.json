@@ -1,7 +1,7 @@
 {
   "name": "pokemon-rogue-battle",
   "private": true,
-  "version": "1.12.3.0",
+  "version": "1.12.4.0",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

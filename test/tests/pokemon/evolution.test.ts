@@ -2,6 +2,7 @@ import { speciesDataRegistry } from "#app/global-species-data-registry";
 import { AbilityId } from "#enums/ability-id";
 import { MoveId } from "#enums/move-id";
 import { SpeciesId } from "#enums/species-id";
+import { UiMode } from "#enums/ui-mode";
 import { GameManager } from "#test/framework/game-manager";
 import * as Utils from "#utils/common";
 import Phaser from "phaser";
@@ -141,6 +142,45 @@ describe("Evolution", () => {
     expect(cyndaquil.hp).toBeGreaterThan(hpBefore);
     expect(cyndaquil.hp).toBeLessThan(cyndaquil.getMaxHp());
   });
+
+  it("autoplay learns an evolution move once and submits the next battle command", async () => {
+    game.override
+      .moveset([MoveId.SURF, MoveId.SPLASH, MoveId.ABSORB, MoveId.ACID])
+      .enemySpecies(SpeciesId.GOLEM)
+      .enemyMoveset(MoveId.SPLASH)
+      .startingWave(41)
+      .startingLevel(35)
+      .enemyLevel(50)
+      .xpMultiplier(2);
+
+    await game.classicMode.startBattle(SpeciesId.CROCALOR);
+    game.field.getEnemyPokemon().hp = 1;
+    game.move.select(MoveId.SURF);
+    await game.phaseInterceptor.to("EvolutionPhase", false);
+
+    const controller = (game.scene as unknown as { autoplayController: { act: () => void } }).autoplayController;
+    game.onNextPrompt("LearnMovePhase", UiMode.CONFIRM, () => controller.act());
+    game.onNextPrompt("LearnMovePhase", UiMode.SUMMARY, () => {
+      const handler = game.scene.ui.getHandler() as unknown as {
+        selectMoveForLearning: (moveIndex: number) => boolean;
+      };
+      const selection = vi.spyOn(handler, "selectMoveForLearning");
+      controller.act();
+      controller.act();
+      controller.act();
+      expect(selection).toHaveBeenCalledTimes(1);
+    });
+
+    await game.phaseInterceptor.to("EndEvolutionPhase");
+
+    const skeledirge = game.field.getPlayerPokemon();
+    expect(skeledirge.species.speciesId).toBe(SpeciesId.SKELEDIRGE);
+
+    game.doSelectModifier();
+    await game.phaseInterceptor.to("CommandPhase");
+    controller.act();
+    await game.phaseInterceptor.to("EnemyCommandPhase");
+  }, 60_000);
 
   it("should handle rng-based split evolution", async () => {
     /* this test checks to make sure that tandemaus will

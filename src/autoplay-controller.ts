@@ -52,6 +52,7 @@ const NOTIFICATION_STORAGE_KEY = "pokerogue.afkAutoplay.notifications";
 const SAVE_SLOT_COUNT = 5;
 const STARTER_TRANSITION_TIMEOUT_MS = 10_000;
 const MYSTERY_OPTION_TIMEOUT_MS = 10_000;
+const LEARN_MOVE_SELECTION_TIMEOUT_MS = 10_000;
 
 export const DEFAULT_AUTOPLAY_STARTER_IDS = [SpeciesId.BULBASAUR, SpeciesId.CHARMANDER, SpeciesId.SQUIRTLE] as const;
 
@@ -480,6 +481,7 @@ export function planAutoplayConfirmation(
     case "AttemptCapturePhase":
     case "CheckSwitchPhase":
     case "EvolutionPhase":
+    case "FormChangePhase":
     case "GameOverPhase":
     case "ScanIvsPhase":
       return "CANCEL";
@@ -722,6 +724,9 @@ export class AutoplayController {
   private pendingMysteryOptionIndex: number | null = null;
   private pendingMysteryOptionStartedAt = 0;
   private mysteryOptionAccepted = false;
+  private pendingLearnMovePhase: LearnMovePhase | null = null;
+  private pendingLearnMoveSelectionStartedAt = 0;
+  private learnMoveSelectionSubmitted = false;
   private readonly shinySeenThisRun = new Set<number>();
   private readonly badge: HTMLDivElement;
   private readonly keydownHandler = (event: KeyboardEvent): void => {
@@ -824,6 +829,10 @@ export class AutoplayController {
   private act(): void {
     const phase = globalScene.phaseManager.getCurrentPhase();
     const mode = globalScene.ui.getMode();
+
+    if (!(phase instanceof LearnMovePhase) || mode !== UiMode.SUMMARY) {
+      this.resetPendingLearnMoveSelection();
+    }
 
     if (phase.phaseName !== "SelectStarterPhase") {
       this.pendingStarterIntent = null;
@@ -974,10 +983,39 @@ export class AutoplayController {
     const incomingProfile = createLearnedMoveProfile(pokemon, incomingMove);
     const plan = planLearnMoveReplacement(currentProfiles, incomingProfile);
     const selectedIndex = plan.kind === "REPLACE" ? plan.index : 4;
+    this.submitLearnMoveSelectionOnce(phase, handler, selectedIndex);
+  }
 
-    if (!handler.selectMoveForLearning(selectedIndex)) {
-      this.pauseForSafety("MOVE LEARNING SELECTION FAILED");
+  /**
+   * Submit the move-learning choice once, then wait for the asynchronous Summary -> message/evolution transition.
+   * A temporarily transitioning Summary handler is retried instead of disabling autoplay.
+   */
+  private submitLearnMoveSelectionOnce(phase: LearnMovePhase, handler: SummaryUiHandler, selectedIndex: number): void {
+    const now = Date.now();
+    if (this.pendingLearnMovePhase !== phase) {
+      this.pendingLearnMovePhase = phase;
+      this.pendingLearnMoveSelectionStartedAt = now;
+      this.learnMoveSelectionSubmitted = false;
     }
+
+    if (this.learnMoveSelectionSubmitted) {
+      return;
+    }
+
+    if (now - this.pendingLearnMoveSelectionStartedAt >= LEARN_MOVE_SELECTION_TIMEOUT_MS) {
+      this.pauseForSafety("MOVE LEARNING SELECTION TIMED OUT");
+      return;
+    }
+
+    if (handler.selectMoveForLearning(selectedIndex)) {
+      this.learnMoveSelectionSubmitted = true;
+    }
+  }
+
+  private resetPendingLearnMoveSelection(): void {
+    this.pendingLearnMovePhase = null;
+    this.pendingLearnMoveSelectionStartedAt = 0;
+    this.learnMoveSelectionSubmitted = false;
   }
 
   private handleTargetSelectMode(): void {
@@ -1835,6 +1873,7 @@ export class AutoplayController {
       this.pendingMysteryOptionIndex = null;
       this.pendingMysteryOptionStartedAt = 0;
       this.mysteryOptionAccepted = false;
+      this.resetPendingLearnMoveSelection();
     }
     this.manualOverride = manualOverride;
     this.statusNote = enabled ? "" : manualOverride ? "MANUAL" : statusNote;

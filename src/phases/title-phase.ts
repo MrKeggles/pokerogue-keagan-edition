@@ -34,25 +34,19 @@ const PATCH_NOTES_VERSION = version.endsWith(".0") ? version.slice(0, -2) : vers
 export const KEAGAN_PATCH_NOTES_TEXT =
   "POK\u00c9ROGUE KEAGAN EDITION$"
   + `VERSION ${PATCH_NOTES_VERSION} PATCH NOTES$`
-  + "Smarter Battles\n"
-  + "Predicts the strongest enemy threat\n"
-  + "Uses real type, level, stats,\n"
-  + "accuracy, priority, and damage\n"
-  + "Handles doubles + friendly fire$"
-  + "Better Level-Up Moves\n"
-  + "Learns useful upgrades\n"
-  + "Replaces the weakest old move\n"
-  + "Keeps damage and type coverage$"
-  + "Unattended Farming\n"
+  + "Evolution Autoplay Fix\n"
+  + "AFK continues after evolutions\n"
+  + "New move choices submit once\n"
+  + "Busy summary screens retry safely\n"
+  + "Form changes continue unattended$"
+  + "Still Included\n"
+  + "Smart type + damage decisions\n"
+  + "Useful level-up move upgrades\n"
   + "Skips Lure reward choices\n"
-  + "Low team HP no longer stops AFK\n"
-  + "Tactical switching stays active\n"
-  + "Wipes restart as normal$"
-  + "Safety + Stability\n"
-  + "Avoids self-destruct attacks\n"
-  + "Move previews preserve battle RNG\n"
-  + "Saves and login survive updates$"
-  + `Install v${PATCH_NOTES_VERSION} over v1.12.1\n`
+  + "Low team HP keeps farming$"
+  + "Updating from 1.12.3\n"
+  + `Install v${PATCH_NOTES_VERSION} over 1.12.3\n`
+  + "Saves, login, and settings remain\n"
   + "Press F8 to resume AFK.";
 
 export class TitlePhase extends Phase {

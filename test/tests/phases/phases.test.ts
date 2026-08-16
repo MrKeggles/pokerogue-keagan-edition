@@ -42,8 +42,8 @@ describe("Phases", () => {
         getOptionsWithScroll: () => { label: string }[];
       };
       expect(handler.getOptionsWithScroll().map(option => option.label)).toContain("Patch Notes");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.2 PATCH NOTES");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Low team HP no longer stops AFK");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.4 PATCH NOTES");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("AFK continues after evolutions");
     });
   });
 

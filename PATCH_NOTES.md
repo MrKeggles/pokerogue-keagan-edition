@@ -5,6 +5,20 @@ SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 # PokéRogue Keagan Edition Patch Notes
 
+## Version 1.12.4 - 16 August 2026
+
+### Evolution autoplay fix
+
+- Fixed an AFK-mode freeze that could happen when an evolved Pokémon tried to learn a new move before returning to the run.
+- Move-learning choices are now submitted only once while the evolution screen changes, preventing duplicate callbacks from corrupting the battle phase queue.
+- If the move summary is still animating, the bot waits and retries instead of immediately switching AFK mode off.
+- If the move-summary screen cannot accept a choice for ten seconds, the bot stops safely and displays a clear reason on the AFK status badge. Once accepted, the handoff is allowed to finish without duplicate input or a suspend-related timeout.
+- Player form-change confirmations follow the same safe unattended policy as normal evolutions.
+
+### Updating from 1.12.3
+
+Install version 1.12.4 over the existing copy, or accept the update prompt in an installed 1.12.3 build. Login, saves, settings, and AFK statistics remain in the existing desktop profile.
+
 ## Version 1.12.3 - 16 August 2026
 
 ### Easier installs and updates

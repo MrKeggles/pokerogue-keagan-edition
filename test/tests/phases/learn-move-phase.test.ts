@@ -5,8 +5,9 @@ import { SpeciesId } from "#enums/species-id";
 import { UiMode } from "#enums/ui-mode";
 import type { LearnMovePhase } from "#phases/learn-move-phase";
 import { GameManager } from "#test/framework/game-manager";
+import { SummaryUiHandler, SummaryUiMode } from "#ui/summary-ui-handler";
 import Phaser from "phaser";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Learn Move Phase", () => {
   let phaserGame: Phaser.Game;
@@ -23,6 +24,35 @@ describe("Learn Move Phase", () => {
     game.override //
       .xpMultiplier(50)
       .enemyMoveset(MoveId.SPLASH);
+  });
+
+  it("consumes a learn-move summary callback only once during an asynchronous screen transition", () => {
+    const moveSelectFunction = vi.fn();
+    const handlers: { active: boolean }[] = [];
+    handlers[UiMode.PARTY] = { active: false };
+    const ui = { handlers, playError: vi.fn(), playSelect: vi.fn() };
+    const handler = Object.create(SummaryUiHandler.prototype) as {
+      getUi: () => typeof ui;
+      moveCursor: number;
+      moveSelect: boolean;
+      moveSelectFunction: ((moveIndex: number) => void) | null;
+      pokemon: { moveset: object[] };
+      processInput: (button: Button) => boolean;
+      summaryUiMode: SummaryUiMode;
+      transitioning: boolean;
+    };
+    handler.getUi = () => ui;
+    handler.transitioning = false;
+    handler.moveSelect = true;
+    handler.moveCursor = 0;
+    handler.pokemon = { moveset: [{}] };
+    handler.summaryUiMode = SummaryUiMode.LEARN_MOVE;
+    handler.moveSelectFunction = moveSelectFunction;
+
+    expect(handler.processInput(Button.ACTION)).toBe(true);
+    expect(handler.processInput(Button.ACTION)).toBe(true);
+    expect(moveSelectFunction).toHaveBeenCalledTimes(1);
+    expect(moveSelectFunction).toHaveBeenCalledWith(0);
   });
 
   it("If Pokemon has less than 4 moves, its newest move will be added to the lowest empty index", async () => {
@@ -71,7 +101,7 @@ describe("Learn Move Phase", () => {
     });
   });
 
-  it("autoplay replaces a weak move instead of rejecting every fifth level-up move", async () => {
+  it("autoplay retries a busy summary once, submits once, and learns the better move", async () => {
     await game.classicMode.startBattle(SpeciesId.BULBASAUR);
     const bulbasaur = game.field.getPlayerPokemon();
     const previousMoves = [MoveId.SPLASH, MoveId.ABSORB, MoveId.ACID, MoveId.VINE_WHIP];
@@ -83,10 +113,26 @@ describe("Learn Move Phase", () => {
       game.scene.ui.processInput(Button.ACTION);
     });
     game.onNextPrompt("LearnMovePhase", UiMode.SUMMARY, () => {
+      const phase = game.scene.phaseManager.getCurrentPhase() as LearnMovePhase;
+      const handler = game.scene.ui.getHandler() as SummaryUiHandler;
+      const originalSelectMoveForLearning = handler.selectMoveForLearning.bind(handler);
+      const selectMoveForLearning = vi
+        .spyOn(handler, "selectMoveForLearning")
+        .mockImplementationOnce(() => false)
+        .mockImplementation(originalSelectMoveForLearning);
+      const pauseForSafety = vi.fn();
       const controller = Object.create(AutoplayController.prototype) as {
         handleLearnMoveSummary: (phase: LearnMovePhase) => void;
+        pauseForSafety: (reason: string) => void;
       };
-      controller.handleLearnMoveSummary(game.scene.phaseManager.getCurrentPhase() as LearnMovePhase);
+      controller.pauseForSafety = pauseForSafety;
+
+      controller.handleLearnMoveSummary(phase);
+      controller.handleLearnMoveSummary(phase);
+      controller.handleLearnMoveSummary(phase);
+
+      expect(selectMoveForLearning).toHaveBeenCalledTimes(2);
+      expect(pauseForSafety).not.toHaveBeenCalled();
     });
     await game.phaseInterceptor.to("LearnMovePhase");
 

@@ -547,7 +547,9 @@ export class SummaryUiHandler extends UiHandler {
       if (button === Button.ACTION) {
         if (this.pokemon && this.moveCursor < this.pokemon.moveset.length) {
           if (this.summaryUiMode === SummaryUiMode.LEARN_MOVE) {
-            this.moveSelectFunction?.(this.moveCursor);
+            const moveSelectFunction = this.moveSelectFunction;
+            this.moveSelectFunction = null;
+            moveSelectFunction?.(this.moveCursor);
           } else if (this.selectedMoveIndex === -1) {
             this.selectedMoveIndex = this.moveCursor;
             this.setCursor(this.moveCursor);
@@ -1354,7 +1356,9 @@ export class SummaryUiHandler extends UiHandler {
 
   hideMoveSelect() {
     if (this.summaryUiMode === SummaryUiMode.LEARN_MOVE) {
-      this.moveSelectFunction?.(4);
+      const moveSelectFunction = this.moveSelectFunction;
+      this.moveSelectFunction = null;
+      moveSelectFunction?.(4);
       return;
     }
 

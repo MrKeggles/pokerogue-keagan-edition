@@ -56,11 +56,13 @@ import { PokemonType } from "#enums/pokemon-type";
 import { UiMode } from "#enums/ui-mode";
 import type { Pokemon } from "#field/pokemon";
 import { MysteryEncounterAutoplayPolicy } from "#mystery-encounters/mystery-encounter-option";
+import type { LearnMovePhase } from "#phases/learn-move-phase";
 import {
   findFirstAutoplaySafeMysteryOptionIndex,
   findFirstEnabledMysteryOptionIndex,
 } from "#ui/mystery-encounter-ui-handler";
-import { describe, expect, it } from "vitest";
+import type { SummaryUiHandler } from "#ui/summary-ui-handler";
+import { describe, expect, it, vi } from "vitest";
 
 describe("Autoplay controller policies", () => {
   describe("battle scoring", () => {
@@ -400,9 +402,82 @@ describe("Autoplay controller policies", () => {
       expect(planAutoplayConfirmation("AttemptCapturePhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("CheckSwitchPhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("EvolutionPhase", false)).toBe("CANCEL");
+      expect(planAutoplayConfirmation("FormChangePhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("GameOverPhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("ScanIvsPhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("AccountPhase", false)).toBe("PAUSE");
+    });
+
+    it("retries a transient move-learning UI failure and submits the choice only once", () => {
+      const controller = Object.create(AutoplayController.prototype) as {
+        learnMoveSelectionSubmitted: boolean;
+        pendingLearnMovePhase: LearnMovePhase | null;
+        pendingLearnMoveSelectionStartedAt: number;
+        pauseForSafety: (reason: string) => void;
+        submitLearnMoveSelectionOnce: (phase: LearnMovePhase, handler: SummaryUiHandler, selectedIndex: number) => void;
+      };
+      const phase = {} as LearnMovePhase;
+      const nextPhase = {} as LearnMovePhase;
+      const selectMoveForLearning = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+      const handler = { selectMoveForLearning } as unknown as SummaryUiHandler;
+      const pauseForSafety = vi.fn();
+      controller.pendingLearnMovePhase = null;
+      controller.pendingLearnMoveSelectionStartedAt = 0;
+      controller.learnMoveSelectionSubmitted = false;
+      controller.pauseForSafety = pauseForSafety;
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+      try {
+        controller.submitLearnMoveSelectionOnce(phase, handler, 2);
+        controller.submitLearnMoveSelectionOnce(phase, handler, 2);
+        controller.submitLearnMoveSelectionOnce(phase, handler, 2);
+
+        expect(selectMoveForLearning).toHaveBeenCalledTimes(2);
+        expect(selectMoveForLearning).toHaveBeenNthCalledWith(1, 2);
+        expect(selectMoveForLearning).toHaveBeenNthCalledWith(2, 2);
+        expect(pauseForSafety).not.toHaveBeenCalled();
+
+        now.mockReturnValue(20_000);
+        controller.submitLearnMoveSelectionOnce(phase, handler, 2);
+        expect(selectMoveForLearning).toHaveBeenCalledTimes(2);
+        expect(pauseForSafety).not.toHaveBeenCalled();
+
+        controller.submitLearnMoveSelectionOnce(nextPhase, handler, 1);
+        expect(selectMoveForLearning).toHaveBeenCalledTimes(3);
+        expect(selectMoveForLearning).toHaveBeenLastCalledWith(1);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("pauses only after a move-learning selection remains busy for ten seconds", () => {
+      const controller = Object.create(AutoplayController.prototype) as {
+        learnMoveSelectionSubmitted: boolean;
+        pendingLearnMovePhase: LearnMovePhase | null;
+        pendingLearnMoveSelectionStartedAt: number;
+        pauseForSafety: (reason: string) => void;
+        submitLearnMoveSelectionOnce: (phase: LearnMovePhase, handler: SummaryUiHandler, selectedIndex: number) => void;
+      };
+      const phase = {} as LearnMovePhase;
+      const selectMoveForLearning = vi.fn().mockReturnValue(false);
+      const handler = { selectMoveForLearning } as unknown as SummaryUiHandler;
+      const pauseForSafety = vi.fn();
+      controller.pendingLearnMovePhase = null;
+      controller.pendingLearnMoveSelectionStartedAt = 0;
+      controller.learnMoveSelectionSubmitted = false;
+      controller.pauseForSafety = pauseForSafety;
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+      try {
+        controller.submitLearnMoveSelectionOnce(phase, handler, 0);
+        expect(pauseForSafety).not.toHaveBeenCalled();
+        now.mockReturnValue(11_000);
+        controller.submitLearnMoveSelectionOnce(phase, handler, 0);
+        expect(selectMoveForLearning).toHaveBeenCalledTimes(1);
+        expect(pauseForSafety).toHaveBeenCalledWith("MOVE LEARNING SELECTION TIMED OUT");
+      } finally {
+        now.mockRestore();
+      }
     });
 
     it("declines only the exact full-party mystery gift prompt", () => {
