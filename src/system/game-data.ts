@@ -72,8 +72,10 @@ import { fixedInt, NumberHolder, randInt, randSeedItem } from "#utils/common";
 import { decrypt, encrypt, getDataTypeKey, isValidJSON } from "#utils/data";
 import { getEnumKeys } from "#utils/enums";
 import { toCamelCase } from "#utils/strings";
-import { AES, enc } from "crypto-js";
+import { AES, enc, SHA256 } from "crypto-js";
 import i18next from "i18next";
+
+const REMOTE_SAVE_UNCERTAIN_KEY_PREFIX = "pokerogue.remote-save-uncertain.";
 
 const ErrorMessages = {
   OUT_OF_DATE: i18next.t("gameData:reloadSaveData"),
@@ -106,6 +108,50 @@ export class GameData {
   public unlockPity: number[];
 
   public appliedMigrators: AppliedMigrators = {};
+
+  /**
+   * Whether the last remote save may have reached the server without a
+   * definitive response. While set, read-only verification is skipped so an
+   * older server copy cannot replace the newer local snapshot. Only a later
+   * successful scheduled remote update or authoritative reload clears it.
+   */
+  private remoteSaveOutcomeUncertain = false;
+
+  private getRemoteSaveUncertainStorageKey(): string {
+    // Hash the account name so this diagnostic marker remains per-user without
+    // exposing the name itself in a localStorage key.
+    const accountHash = SHA256(loggedInUser?.username ?? "anonymous")
+      .toString(enc.Hex)
+      .slice(0, 16);
+    return `${REMOTE_SAVE_UNCERTAIN_KEY_PREFIX}${accountHash}`;
+  }
+
+  private isRemoteSaveOutcomeUncertain(): boolean {
+    if (this.remoteSaveOutcomeUncertain) {
+      return true;
+    }
+
+    try {
+      this.remoteSaveOutcomeUncertain = localStorage.getItem(this.getRemoteSaveUncertainStorageKey()) === "1";
+    } catch {
+      // The in-memory flag still protects this session if storage is disabled.
+    }
+    return this.remoteSaveOutcomeUncertain;
+  }
+
+  private setRemoteSaveOutcomeUncertain(uncertain: boolean): void {
+    this.remoteSaveOutcomeUncertain = uncertain;
+    try {
+      const key = this.getRemoteSaveUncertainStorageKey();
+      if (uncertain) {
+        localStorage.setItem(key, "1");
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // The in-memory flag still protects this session if storage is disabled.
+    }
+  }
 
   /**
    * @param fromRaw - (Default `false`) Whether to skip initialization of fields that are normally
@@ -288,7 +334,11 @@ export class GameData {
     return true;
   }
 
-  public async loadSystem(): Promise<boolean> {
+  /**
+   * Load system data from local storage or the server.
+   * @param allowMissing - Whether a server 404 is valid (as it is for a new account).
+   */
+  public async loadSystem(allowMissing = true): Promise<boolean> {
     console.log("Client Session:", clientSessionId);
 
     if (bypassLogin && !localStorage.getItem(`data_${loggedInUser?.username}`)) {
@@ -303,7 +353,7 @@ export class GameData {
     if (typeof saveDataOrErr === "number" || !saveDataOrErr || saveDataOrErr.length === 0 || saveDataOrErr[0] !== "{") {
       if (saveDataOrErr === 404) {
         globalScene.phaseManager.queueMessage(ErrorMessages.DATA_NOT_FOUND, null, true);
-        return true;
+        return allowMissing;
       }
       if (typeof saveDataOrErr === "string" && saveDataOrErr.includes("Too many connections")) {
         globalScene.phaseManager.queueMessage(ErrorMessages.TOO_MANY_CONNECTIONS, null, true);
@@ -536,11 +586,19 @@ export class GameData {
   }
 
   public async verify(): Promise<boolean> {
-    if (bypassLogin) {
+    if (bypassLogin || this.isRemoteSaveOutcomeUncertain()) {
       return true;
     }
 
-    const systemData = await pokerogueApi.savedata.system.verify({ clientSessionId });
+    let systemData: SystemSaveData | null;
+    try {
+      systemData = await pokerogueApi.savedata.system.verify({ clientSessionId });
+    } catch (err) {
+      // Verification is a read-only consistency check. A temporary outage must
+      // not prevent the locally-cached run from continuing.
+      console.warn("System savedata verification was skipped because the API was unavailable.", err);
+      return true;
+    }
 
     if (systemData == null) {
       return true;
@@ -575,12 +633,39 @@ export class GameData {
   } = {}): Promise<false> {
     const alertMessage = systemDataStr ? ErrorMessages.OUT_OF_DATE_LOCAL : ErrorMessages.OUT_OF_DATE;
 
+    const localDataKeys = [
+      `data_${loggedInUser?.username}`,
+      ...Array.from({ length: 5 }, (_, slotId) => getSessionDataLocalStorageKey(slotId)),
+    ];
+    const localDataSnapshot = new Map(localDataKeys.map(key => [key, localStorage.getItem(key)]));
+
+    const restoreLocalDataSnapshot = (): void => {
+      for (const [key, value] of localDataSnapshot) {
+        if (value === null) {
+          localStorage.removeItem(key);
+        } else {
+          localStorage.setItem(key, value);
+        }
+      }
+    };
+
     this.clearLocalData();
 
-    if (systemDataStr) {
-      await this.initSystem(systemDataStr);
+    let initialized = false;
+    try {
+      initialized = systemDataStr ? await this.initSystem(systemDataStr) : await this.loadSystem(false);
+    } catch (err) {
+      restoreLocalDataSnapshot();
+      throw err;
+    }
+
+    if (initialized) {
+      // A confirmed authoritative snapshot has replaced the local copy.
+      this.setRemoteSaveOutcomeUncertain(false);
     } else {
-      await this.loadSystem();
+      // Keep the last known-good local system and session snapshots if the
+      // authoritative replacement could not be downloaded or initialized.
+      restoreLocalDataSnapshot();
     }
 
     return this.showInvalidSaveModal(false, message ?? alertMessage);
@@ -1214,41 +1299,73 @@ export class GameData {
       clientSessionId,
     };
 
-    localStorage.setItem(
-      `data_${loggedInUser?.username}`,
-      encrypt(
-        JSON.stringify(systemData, (_k: any, v: any) =>
-          typeof v === "bigint" ? (v <= maxIntAttrValue ? Number(v) : v.toString()) : v,
+    try {
+      localStorage.setItem(
+        `data_${loggedInUser?.username}`,
+        encrypt(
+          JSON.stringify(systemData, (_k: any, v: any) =>
+            typeof v === "bigint" ? (v <= maxIntAttrValue ? Number(v) : v.toString()) : v,
+          ),
+          bypassLogin,
         ),
-        bypassLogin,
-      ),
-    );
+      );
 
-    localStorage.setItem(
-      getSessionDataLocalStorageKey(globalScene.sessionSlotId),
-      encrypt(JSON.stringify(sessionData), bypassLogin),
-    );
+      localStorage.setItem(
+        getSessionDataLocalStorageKey(globalScene.sessionSlotId),
+        encrypt(JSON.stringify(sessionData), bypassLogin),
+      );
+    } catch (err) {
+      if (sync) {
+        globalScene.ui.savingIcon.hide();
+      }
+      throw err;
+    }
 
     console.debug(`Session data saved to slot ${globalScene.sessionSlotId}!`);
 
     if (bypassLogin || !sync) {
-      const verified = await this.verify();
-      globalScene.ui.savingIcon.hide();
-      return verified;
+      try {
+        return await this.verify();
+      } finally {
+        if (sync) {
+          globalScene.ui.savingIcon.hide();
+        }
+      }
     }
 
-    const saveError = await pokerogueApi.savedata.updateAll(request);
-    if (sync) {
+    let saveError: string;
+    // Persist this before dispatch so a process exit while the POST is in
+    // flight cannot make the next launch trust an older remote snapshot.
+    this.setRemoteSaveOutcomeUncertain(true);
+    try {
+      saveError = await pokerogueApi.savedata.updateAll(request);
+    } catch (err) {
+      // The request may have reached the server before the connection failed.
+      // Keep the local snapshot and let a later normal sync reconcile it; do
+      // not immediately repeat an ambiguous POST.
+      console.warn("Remote save outcome is unknown; continuing with the local snapshot.", err);
       globalScene.lastSavePlayTime = 0;
+      return true;
+    } finally {
       globalScene.ui.savingIcon.hide();
     }
+
+    globalScene.lastSavePlayTime = 0;
 
     if (!saveError) {
+      this.setRemoteSaveOutcomeUncertain(false);
+      return true;
+    }
+
+    const httpStatus = Number(/^HTTP (\d{3}):/i.exec(saveError.trim())?.[1]);
+    const isTransientHttpFailure = httpStatus === 408 || httpStatus === 429 || httpStatus >= 500;
+    if (/^(?:NET\d{2}:|Unknown error)/i.test(saveError.trim()) || isTransientHttpFailure) {
+      console.warn("Remote save outcome is unknown; continuing with the local snapshot.", saveError);
       return true;
     }
 
     // TODO: handle this more gracefully
-    if (saveError.startsWith("session out of date")) {
+    if (saveError.toLowerCase().includes("session out of date")) {
       globalScene.phaseManager.clearPhaseQueue();
       await this.reinitializeSaveData();
     }

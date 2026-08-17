@@ -34,18 +34,18 @@ const PATCH_NOTES_VERSION = version.endsWith(".0") ? version.slice(0, -2) : vers
 export const KEAGAN_PATCH_NOTES_TEXT =
   "POK\u00c9ROGUE KEAGAN EDITION$"
   + `VERSION ${PATCH_NOTES_VERSION} PATCH NOTES$`
-  + "Evolution Autoplay Fix\n"
-  + "AFK continues after evolutions\n"
-  + "New move choices submit once\n"
-  + "Busy summary screens retry safely\n"
-  + "Form changes continue unattended$"
+  + "Stability Update\n"
+  + "Sandstorm no longer freezes runs\n"
+  + "Battle effects fail safely\n"
+  + "API waits now time out cleanly\n"
+  + "Login survives temporary outages$"
   + "Still Included\n"
   + "Smart type + damage decisions\n"
   + "Useful level-up move upgrades\n"
   + "Skips Lure reward choices\n"
   + "Low team HP keeps farming$"
-  + "Updating from 1.12.3\n"
-  + `Install v${PATCH_NOTES_VERSION} over 1.12.3\n`
+  + "Updating from 1.12.4\n"
+  + `Install v${PATCH_NOTES_VERSION} over 1.12.4\n`
   + "Saves, login, and settings remain\n"
   + "Press F8 to resume AFK.";
 

@@ -297,19 +297,39 @@ export class EncounterPhase extends BattlePhase {
           this.trySetWeatherIfNewBiome();
           this.trySetTerrainIfNewBiome();
           // Game syncs to server on waves X1 and X6 (As of 1.2.0)
-          globalScene.gameData
-            .saveAll(true, battle.waveIndex % 5 === 1 || (globalScene.lastSavePlayTime ?? 0) >= 300)
-            .then(success => {
-              globalScene.disableMenu = false;
-              if (!success) {
-                return globalScene.reset(true);
-              }
-              this.doEncounter();
-              globalScene.resetSeed();
-            });
+          void this.saveAndContinueEncounter(battle.waveIndex % 5 === 1 || (globalScene.lastSavePlayTime ?? 0) >= 300);
         }
       });
     });
+  }
+
+  /**
+   * Persist the new wave before starting it without leaving the phase wedged
+   * if storage or the API fails. Read-only verification outages and ambiguous
+   * remote writes are treated as successful by `saveAll` once a local snapshot
+   * exists; other failures return to the title screen instead of retrying a
+   * potentially-completed POST.
+   */
+  private async saveAndContinueEncounter(sync: boolean): Promise<void> {
+    let success = false;
+    try {
+      success = await globalScene.gameData.saveAll(true, sync);
+    } catch (err) {
+      console.error("Could not save before the encounter; returning to the title screen.", err);
+    } finally {
+      globalScene.disableMenu = false;
+      // `saveAll` normally owns this icon, but this phase-level cleanup also
+      // covers unexpected rejections before its normal cleanup path.
+      globalScene.ui.savingIcon.hide();
+    }
+
+    if (!success) {
+      globalScene.reset(true);
+      return;
+    }
+
+    this.doEncounter();
+    globalScene.resetSeed();
   }
 
   /**

@@ -17,6 +17,7 @@ $electronDir = Join-Path $repoRoot "electron"
 $builderConfigPath = Join-Path $repoRoot "electron-builder.json"
 $packageJsonPath = Join-Path $repoRoot "package.json"
 $logoPath = Join-Path $repoRoot "assets\logo512.png"
+$installerScriptPath = Join-Path $repoRoot "electron\installer.nsh"
 $licensePath = Join-Path $repoRoot "LICENSE"
 $licensesDir = Join-Path $repoRoot "LICENSES"
 $readmePath = Join-Path $repoRoot "README.md"
@@ -358,6 +359,7 @@ foreach ($requiredPath in @(
     $builderConfigPath,
     $packageJsonPath,
     $logoPath,
+    $installerScriptPath,
     $licensePath,
     $licensesDir,
     $readmePath,
@@ -509,6 +511,9 @@ try {
     }
   )
   $builderConfig.win.icon = $logoPath
+  # electron-builder resolves NSIS resources relative to the staged project.
+  # Keep this migration script anchored to the real source tree instead.
+  $builderConfig.nsis.include = $installerScriptPath
   $builderConfig | Add-Member -NotePropertyName electronVersion -NotePropertyValue $electronVersion -Force
   $builderConfig.extraMetadata.dependencies = [ordered]@{
     'electron-updater' = $updaterVersion

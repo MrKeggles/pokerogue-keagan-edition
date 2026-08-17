@@ -1,4 +1,5 @@
 import { PokerogueAccountApi } from "#api/account-api";
+import { ApiRequestTimeoutError } from "#api/api-base";
 import { SESSION_ID_COOKIE_NAME } from "#app/constants";
 import { initServerForApiTests } from "#test/setup/test-file-initialization";
 import { getApiBaseUrl } from "#test/utils/test-utils";
@@ -126,6 +127,17 @@ describe("Pokerogue Account API", () => {
 
       expect(error).toBe("NET01: Login failed to reach the API (Failed to fetch)");
       expect(console.warn).toHaveBeenCalledWith("Login failed!", expect.any(Error));
+    });
+
+    it("should identify a timed-out login request", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new ApiRequestTimeoutError("POST", "/account/login", 25_000));
+
+      const error = await accountApi.login(loginParams);
+
+      expect(error).toBe("NET04: Login timed out while waiting for the API. Please try again.");
+      fetchSpy.mockRestore();
     });
 
     it("should identify a Cloudflare challenge response", async () => {

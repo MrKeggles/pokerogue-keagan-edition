@@ -42,8 +42,8 @@ describe("Phases", () => {
         getOptionsWithScroll: () => { label: string }[];
       };
       expect(handler.getOptionsWithScroll().map(option => option.label)).toContain("Patch Notes");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.4 PATCH NOTES");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("AFK continues after evolutions");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.5 PATCH NOTES");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Sandstorm no longer freezes runs");
     });
   });
 

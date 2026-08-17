@@ -40,6 +40,14 @@ describe("Pokerogue Savedata API", () => {
       expect(error).toBe("Failed to update all!");
     });
 
+    it("should not treat an empty HTTP 500 response as a successful save", async () => {
+      server.use(http.post(`${apiBase}/savedata/updateall`, () => new HttpResponse(null, { status: 500 })));
+
+      const error = await savedataApi.updateAll({} as UpdateAllSavedataRequest);
+
+      expect(error).toMatch(/^HTTP 500:/);
+    });
+
     it("should return 'Unknown error' and report a warning on ERROR", async () => {
       server.use(http.post(`${apiBase}/savedata/updateall`, () => HttpResponse.error()));
 

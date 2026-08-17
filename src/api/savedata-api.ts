@@ -26,7 +26,12 @@ export class PokerogueSavedataApi extends ApiBase {
         typeof v === "bigint" ? (v <= MAX_INT_ATTR_VALUE ? Number(v) : v.toString()) : v,
       );
       const response = await this.doPost("/savedata/updateall", rawBodyData);
-      return await response.text();
+      const responseBody = await response.text();
+      if (!response.ok) {
+        const detail = responseBody.trim() || response.statusText || "Save request failed";
+        return `HTTP ${response.status}: ${detail}`;
+      }
+      return responseBody;
     } catch (err) {
       console.warn("Could not update all savedata!", err);
       return "Unknown error";

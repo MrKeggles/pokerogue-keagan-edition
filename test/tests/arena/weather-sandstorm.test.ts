@@ -1,3 +1,5 @@
+import { settings } from "#app/global-settings-manager";
+import { CommonBattleAnim } from "#data/battle-anims";
 import { AbilityId } from "#enums/ability-id";
 import { MoveId } from "#enums/move-id";
 import { SpeciesId } from "#enums/species-id";
@@ -5,7 +7,7 @@ import { Stat } from "#enums/stat";
 import { WeatherType } from "#enums/weather-type";
 import { GameManager } from "#test/framework/game-manager";
 import Phaser from "phaser";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Weather - Sandstorm", () => {
   let phaserGame: Phaser.Game;
@@ -25,6 +27,10 @@ describe("Weather - Sandstorm", () => {
       .moveset(MoveId.SPLASH)
       .enemyMoveset(MoveId.SPLASH)
       .enemySpecies(SpeciesId.MAGIKARP);
+  });
+
+  afterEach(() => {
+    settings.update("display", "enableMoveAnimations", false);
   });
 
   it("inflicts damage equal to 1/16 of Pokemon's max HP at turn end", async () => {
@@ -83,5 +89,34 @@ describe("Weather - Sandstorm", () => {
     const enemyPokemon = game.field.getEnemyPokemon();
     const enemySpdef = enemyPokemon.getStat(Stat.SPDEF);
     expect(enemyPokemon.getEffectiveStat(Stat.SPDEF)).toBe(enemySpdef);
+  });
+
+  it("progresses past Sandstorm after Sand Stream's user KOs the opponent with animations enabled", async () => {
+    settings.update("display", "enableMoveAnimations", true);
+    const animationPlay = vi.spyOn(CommonBattleAnim.prototype, "play");
+    game.override
+      .weather(WeatherType.NONE)
+      .ability(AbilityId.NO_GUARD)
+      .passiveAbility(AbilityId.SAND_STREAM)
+      .moveset(MoveId.SHEER_COLD)
+      .startingLevel(100)
+      .enemySpecies(SpeciesId.SURSKIT)
+      .enemyLevel(1)
+      .enemyMoveset(MoveId.SPLASH);
+    await game.classicMode.startBattle(SpeciesId.SANDSHREW);
+
+    expect(game.scene.arena.weather?.weatherType).toBe(WeatherType.SANDSTORM);
+    const animationsBeforeAttack = animationPlay.mock.calls.length;
+    const enemy = game.field.getEnemyPokemon();
+
+    game.move.select(MoveId.SHEER_COLD);
+    await game.phaseInterceptor.to("TurnEndPhase");
+
+    expect(enemy.isFainted()).toBe(true);
+    expect(animationPlay.mock.calls.length).toBeGreaterThan(animationsBeforeAttack);
+    expect(game.phaseInterceptor.log).toContain("WeatherEffectPhase");
+    expect(game.phaseInterceptor.log.indexOf("WeatherEffectPhase")).toBeLessThan(
+      game.phaseInterceptor.log.indexOf("TurnEndPhase"),
+    );
   });
 });

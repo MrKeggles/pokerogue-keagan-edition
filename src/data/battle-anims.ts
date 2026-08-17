@@ -277,6 +277,27 @@ abstract class AnimTimedEvent {
   abstract getEventType(): string;
 }
 
+/**
+ * Battle animation audio is only used to keep a cosmetic animation on screen long enough for its sound to finish.
+ * No shipped battle animation sound is close to this limit; values beyond it indicate broken audio metadata and must
+ * not be allowed to create an effectively infinite Phaser tween.
+ */
+export const MAX_BATTLE_ANIM_AUDIO_DURATION_SECONDS = 10;
+const BATTLE_ANIM_FRAMES_PER_SECOND = 30;
+
+/** Convert a trustworthy audio duration to the number of 30 FPS battle-animation frames it occupies. */
+export function getBattleAnimAudioDurationFrames(durationSeconds: number): number {
+  if (
+    !Number.isFinite(durationSeconds)
+    || durationSeconds <= 0
+    || durationSeconds > MAX_BATTLE_ANIM_AUDIO_DURATION_SECONDS
+  ) {
+    return 0;
+  }
+
+  return Math.ceil(durationSeconds * BATTLE_ANIM_FRAMES_PER_SECOND);
+}
+
 class AnimTimedSoundEvent extends AnimTimedEvent {
   public volume = 100;
   public pitch = 100;
@@ -303,13 +324,13 @@ class AnimTimedSoundEvent extends AnimTimedEvent {
       if (!sound) {
         return 0;
       }
-      return Math.ceil((sound.totalDuration * 1000) / 33.33);
+      return getBattleAnimAudioDurationFrames(sound.totalDuration);
     }
     const cry = battleAnim.user!.cry(soundConfig); // TODO: is the bang behind user correct?
     if (!cry) {
       return 0;
     }
-    return Math.ceil((cry.totalDuration * 1000) / 33.33);
+    return getBattleAnimAudioDurationFrames(cry.totalDuration);
   }
 
   getEventType(): string {

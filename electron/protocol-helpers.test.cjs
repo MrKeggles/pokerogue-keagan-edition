@@ -10,8 +10,11 @@ const {
   API_BASE_URL,
   APP_CONTENT_SECURITY_POLICY,
   DESKTOP_USER_AGENT,
+  ApiProxyTimeoutError,
   buildProxyRequestInit,
   createApiTarget,
+  fetchProxiedApiResponse,
+  formatApiProxyLog,
   isApiPath,
   isAllowedAppPermission,
   isAppUrl,
@@ -71,6 +74,88 @@ async function runTests() {
   assert.equal(init.headers.get("User-Agent"), DESKTOP_USER_AGENT);
   assert.match(DESKTOP_USER_AGENT, /Chrome\/150\.0\.0\.0/);
   assert.equal(init.credentials, "omit");
+
+  const bufferedResponse = await fetchProxiedApiResponse(
+    { ...request, method: "GET" },
+    new URL("pokerogue://app/api/game/titlestats?token=do-not-log"),
+    async (_url, proxyInit) => {
+      assert.equal(proxyInit.signal?.aborted, false);
+      return new Response("buffered response", {
+        status: 201,
+        headers: {
+          "Content-Encoding": "gzip",
+          "Content-Length": "999",
+          "Transfer-Encoding": "chunked",
+          "X-Test": "yes",
+        },
+      });
+    },
+    100,
+  );
+  assert.equal(bufferedResponse.status, 201);
+  assert.equal(bufferedResponse.headers.get("X-Test"), "yes");
+  assert.equal(bufferedResponse.headers.get("Content-Encoding"), null);
+  assert.equal(bufferedResponse.headers.get("Content-Length"), null);
+  assert.equal(bufferedResponse.headers.get("Transfer-Encoding"), null);
+  assert.equal(await bufferedResponse.text(), "buffered response");
+
+  /** @type {{ signal: AbortSignal | null | undefined }} */
+  const pendingFetch = { signal: undefined };
+  await assert.rejects(
+    fetchProxiedApiResponse(
+      { ...request, method: "GET" },
+      new URL("pokerogue://app/api/savedata/system/verify?clientSessionId=secret"),
+      (_url, proxyInit) => {
+        pendingFetch.signal = proxyInit.signal;
+        return new Promise(() => {});
+      },
+      5,
+    ),
+    ApiProxyTimeoutError,
+  );
+  assert.ok(pendingFetch.signal);
+  assert.equal(pendingFetch.signal.aborted, true);
+
+  /** @type {{ signal: AbortSignal | null | undefined }} */
+  const pendingBody = { signal: undefined };
+  await assert.rejects(
+    fetchProxiedApiResponse(
+      { ...request, method: "GET" },
+      new URL("pokerogue://app/api/savedata/session/get?slot=1&clientSessionId=secret"),
+      (_url, proxyInit) => {
+        pendingBody.signal = proxyInit.signal;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start() {
+                // Deliberately never close: this models an upstream response
+                // that sent headers and then stalled while sending its body.
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+      5,
+    ),
+    ApiProxyTimeoutError,
+  );
+  assert.ok(pendingBody.signal);
+  assert.equal(pendingBody.signal.aborted, true);
+
+  const callerAbortController = new AbortController();
+  const abortedRequest = fetchProxiedApiResponse(
+    { ...request, method: "GET", signal: callerAbortController.signal },
+    new URL("pokerogue://app/api/account/info"),
+    () => new Promise(() => {}),
+    100,
+  );
+  callerAbortController.abort();
+  await assert.rejects(abortedRequest, err => err instanceof Error && err.name === "AbortError");
+
+  const safeLog = formatApiProxyLog("post", "/savedata/updateall?clientSessionId=secret", 504, 19.6);
+  assert.equal(safeLog, "API proxy POST /savedata/updateall -> 504 (20 ms)");
+  assert.doesNotMatch(safeLog, /secret|clientSessionId|\?/);
 
   assert.equal(parseAllowedExternalUrl("https://wiki.pokerogue.net/")?.protocol, "https:");
   assert.equal(parseAllowedExternalUrl("http://wiki.pokerogue.net/"), null);

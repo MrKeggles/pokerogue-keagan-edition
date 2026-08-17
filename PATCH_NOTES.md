@@ -5,6 +5,30 @@ SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 # PokéRogue Keagan Edition Patch Notes
 
+## Version 1.12.5 - 17 August 2026
+
+### Battle stability
+
+- Fixed the battle freeze shown on **"The sandstorm rages."** after Sand Stream activated and a Pokémon fainted.
+- Cosmetic battle animations now reject invalid audio timing values and have a bounded completion fallback, so a broken effect cannot hold the battle phase forever.
+- The fix applies to weather and other common battle effects rather than special-casing one Pokémon or one encounter.
+
+### Login and connection reliability
+
+- Account and save requests now have bounded timeouts instead of being able to leave the login screen or a new encounter loading forever.
+- Temporary API, Cloudflare, or server failures no longer erase a newly accepted login. Stored login details are removed only when the server confirms that the session is unauthorized.
+- Login now waits for the account save to load successfully; a temporary save-download failure opens the retry screen instead of starting with blank data.
+- Encounter setup now recovers cleanly when save verification fails. An uncertain upload is not retried immediately, and its newer local snapshot remains protected across restarts until a later scheduled sync succeeds.
+- Desktop diagnostics record request completion status and duration without logging passwords, tokens, request bodies, or query values.
+
+### Cleaner upgrades
+
+- The installer removes the obsolete unaccented **PokeRogue Keagan Edition** shortcuts left by early test builds. It does not remove either desktop profile, saves, settings, or login data.
+
+### Updating from 1.12.4
+
+Accept the update prompt in an installed 1.12.4 build, or install version 1.12.5 over the existing copy. Login, saves, settings, and AFK statistics remain in the existing desktop profile.
+
 ## Version 1.12.4 - 16 August 2026
 
 ### Evolution autoplay fix

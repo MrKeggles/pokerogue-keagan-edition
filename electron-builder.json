@@ -69,6 +69,7 @@
   },
   "nsis": {
     "artifactName": "PokeRogue-Keagan-Edition-${version}-nsis.${ext}",
+    "include": "electron/installer.nsh",
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "perMachine": false,

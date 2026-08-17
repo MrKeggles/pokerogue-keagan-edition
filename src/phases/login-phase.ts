@@ -9,7 +9,7 @@ import { PlayerGender } from "#enums/player-gender";
 import { UiMode } from "#enums/ui-mode";
 import { executeIf, sessionIdKey } from "#utils/common";
 import { getCookie, removeCookie } from "#utils/cookies";
-import i18next, { t } from "i18next";
+import i18next from "i18next";
 
 export class LoginPhase extends Phase {
   public readonly phaseName = "LoginPhase";
@@ -28,7 +28,7 @@ export class LoginPhase extends Phase {
   }
 
   public override async start(): Promise<void> {
-    const { gameData, ui } = globalScene;
+    const { ui } = globalScene;
 
     super.start();
 
@@ -45,13 +45,7 @@ export class LoginPhase extends Phase {
       return;
     }
 
-    await gameData.loadSystem();
-    if (success || bypassLogin) {
-      await this.end();
-      return;
-    }
-    ui.setMode(UiMode.MESSAGE);
-    ui.showText(t("menu:failedToLoadSaveData"));
+    await this.loadSystemAndContinue();
   }
 
   public override async end(): Promise<void> {
@@ -77,6 +71,34 @@ export class LoginPhase extends Phase {
       return;
     }
 
+    this.retryWhenAvailable();
+  }
+
+  /**
+   * Load account save data before leaving the login flow. A successful account
+   * check alone is not enough: continuing with an uninitialized GameData could
+   * later upload defaults over an existing remote save.
+   */
+  private async loadSystemAndContinue(): Promise<boolean> {
+    let loaded = false;
+    try {
+      loaded = await globalScene.gameData.loadSystem();
+    } catch (err) {
+      console.error("Could not load system save data after login.", err);
+    }
+
+    if (loaded || bypassLogin) {
+      await this.end();
+      return true;
+    }
+
+    // Keep the accepted session token and use the existing retry screen. A
+    // transient timeout must not become either a logout or a blank new save.
+    this.retryWhenAvailable();
+    return false;
+  }
+
+  private retryWhenAvailable(): void {
     globalScene.phaseManager.unshiftNew("UnavailablePhase");
     super.end();
   }
@@ -103,17 +125,28 @@ export class LoginPhase extends Phase {
 
   private async checkUserInfo(): Promise<boolean> {
     globalScene.ui.playSelect();
-    const success = await updateUserInfo();
-    if (!success[0]) {
+    const [success, statusCode] = await updateUserInfo();
+    if (!success && statusCode === 401) {
       removeCookie(sessionIdKey);
       globalScene.reset(true, true);
       return false;
     }
+
+    if (!success) {
+      // The credentials were accepted, but the follow-up account request could
+      // not be completed. Keep the newly-issued token so a temporary outage,
+      // timeout, or proxy/Cloudflare error does not log the player out. The
+      // unavailable screen will retry and only clears the token if the server
+      // later gives us a definitive unauthorized response.
+      this.retryWhenAvailable();
+      return false;
+    }
+
     return true;
   }
 
   public goToLogin(): void {
-    const { gameData, ui, phaseManager } = globalScene;
+    const { ui, phaseManager } = globalScene;
 
     const backButton = () => {
       phaseManager.unshiftNew("LoginPhase", false);
@@ -125,8 +158,7 @@ export class LoginPhase extends Phase {
       if (!success) {
         return;
       }
-      await gameData.loadSystem();
-      this.end();
+      await this.loadSystemAndContinue();
     };
     audioManager.playSound("ui/menu_open");
 

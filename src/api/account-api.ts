@@ -14,6 +14,12 @@ export class PokerogueAccountApi extends ApiBase {
   private parseThrownAccountError(err: unknown, fallback: string): string {
     const message = err instanceof Error ? err.message : String(err);
     const normalized = message.toLowerCase();
+    const errorCode =
+      typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : null;
+
+    if (errorCode === "ETIMEDOUT" || normalized.includes("timed out") || normalized.includes("timeout")) {
+      return `NET04: ${fallback} timed out while waiting for the API. Please try again.`;
+    }
 
     if (
       normalized.includes("failed to fetch")

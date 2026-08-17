@@ -13,6 +13,7 @@ const API_PREFIX = "/api";
 const API_BASE_URL = "https://api.pokerogue.net";
 const API_ORIGIN = "https://pokerogue.net";
 const API_REFERER = `${API_ORIGIN}/`;
+const API_PROXY_TIMEOUT_MS = 20_000;
 const DESKTOP_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
   + "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
@@ -34,6 +35,15 @@ const APP_CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
   "frame-src 'none'",
 ].join("; ");
+
+class ApiProxyTimeoutError extends Error {
+  /** @param {number} timeoutMs */
+  constructor(timeoutMs) {
+    super(`The upstream API did not finish responding within ${timeoutMs} ms.`);
+    this.name = "ApiProxyTimeoutError";
+    this.code = "ETIMEDOUT";
+  }
+}
 
 /**
  * @typedef {Omit<RequestInit, "headers"> & { headers: Headers, bypassCustomProtocolHandlers?: boolean }} ProxyRequestInit
@@ -94,9 +104,10 @@ function createApiTarget(requestUrl) {
 
 /**
  * @param {Pick<Request, "method" | "headers" | "arrayBuffer">} request
+ * @param {AbortSignal} [signal]
  * @returns {Promise<ProxyRequestInit>}
  */
-async function buildProxyRequestInit(request) {
+async function buildProxyRequestInit(request, signal) {
   const headers = new Headers(request.headers);
 
   // These values belong to the renderer's custom origin (or describe the old
@@ -123,11 +134,112 @@ async function buildProxyRequestInit(request) {
     bypassCustomProtocolHandlers: true,
   };
 
+  if (signal) {
+    init.signal = signal;
+  }
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.arrayBuffer();
   }
 
   return init;
+}
+
+/**
+ * Fetch an upstream API response and buffer it before returning it to the
+ * custom protocol handler. Buffering is intentional: it keeps the same
+ * deadline active while the upstream response body is being downloaded.
+ *
+ * @param {Pick<Request, "method" | "headers" | "arrayBuffer"> & { signal?: AbortSignal }} request
+ * @param {URL} requestUrl
+ * @param {(url: string, init: ProxyRequestInit) => Promise<Response>} fetchImpl
+ * @param {number} timeoutMs
+ * @returns {Promise<Response>}
+ */
+async function fetchProxiedApiResponse(request, requestUrl, fetchImpl, timeoutMs = API_PROXY_TIMEOUT_MS) {
+  const target = createApiTarget(requestUrl);
+  const controller = new AbortController();
+  const timeoutError = new ApiProxyTimeoutError(timeoutMs);
+  let timeoutId;
+  let removeCallerAbortListener = () => {};
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      // Reject first so a fetch implementation that synchronously reacts to
+      // abort cannot replace the explicit timeout error with a generic one.
+      reject(timeoutError);
+      controller.abort(timeoutError);
+    }, timeoutMs);
+  });
+
+  /** @type {Promise<never> | undefined} */
+  let callerAbortPromise;
+  const callerSignal = request.signal;
+  if (callerSignal) {
+    callerAbortPromise = new Promise((_, reject) => {
+      const rejectForCallerAbort = () => {
+        const reason = callerSignal.reason;
+        const abortError = reason instanceof Error ? reason : new Error("The API request was aborted.");
+        abortError.name = reason instanceof Error ? reason.name : "AbortError";
+        reject(abortError);
+        controller.abort(abortError);
+      };
+
+      if (callerSignal.aborted) {
+        rejectForCallerAbort();
+        return;
+      }
+
+      callerSignal.addEventListener("abort", rejectForCallerAbort, { once: true });
+      removeCallerAbortListener = () => callerSignal.removeEventListener("abort", rejectForCallerAbort);
+    });
+  }
+
+  const fetchAndBuffer = async () => {
+    const init = await buildProxyRequestInit(request, controller.signal);
+    const upstreamResponse = await fetchImpl(target.toString(), init);
+    const responseHasBody = request.method !== "HEAD" && ![204, 205, 304].includes(upstreamResponse.status);
+    const body = responseHasBody ? await upstreamResponse.arrayBuffer() : null;
+    const responseHeaders = new Headers(upstreamResponse.headers);
+
+    // Fetch exposes a decoded body. Forwarding transport headers from the
+    // encoded upstream payload can make Chromium decode it again or trust a
+    // stale byte length when the custom protocol response is reconstructed.
+    responseHeaders.delete("Content-Encoding");
+    responseHeaders.delete("Content-Length");
+    responseHeaders.delete("Transfer-Encoding");
+
+    return new Response(body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: responseHeaders,
+    });
+  };
+
+  try {
+    const pending = [fetchAndBuffer(), timeoutPromise];
+    if (callerAbortPromise) {
+      pending.push(callerAbortPromise);
+    }
+    return await Promise.race(pending);
+  } finally {
+    clearTimeout(timeoutId);
+    removeCallerAbortListener();
+  }
+}
+
+/**
+ * Format a privacy-safe API proxy diagnostic. Only the HTTP method and path
+ * are accepted; query strings, headers and bodies are intentionally omitted.
+ *
+ * @param {string} method
+ * @param {string} pathname
+ * @param {string | number} outcome
+ * @param {number} durationMs
+ */
+function formatApiProxyLog(method, pathname, outcome, durationMs) {
+  const safePath = pathname.split(/[?#]/, 1)[0] || "/";
+  return `API proxy ${method.toUpperCase()} ${safePath} -> ${outcome} (${Math.max(0, Math.round(durationMs))} ms)`;
 }
 
 /**
@@ -184,7 +296,9 @@ module.exports = {
   API_BASE_URL,
   API_ORIGIN,
   API_PREFIX,
+  API_PROXY_TIMEOUT_MS,
   API_REFERER,
+  ApiProxyTimeoutError,
   APP_HOST,
   APP_CONTENT_SECURITY_POLICY,
   APP_SCHEME,
@@ -192,6 +306,8 @@ module.exports = {
   DESKTOP_USER_AGENT,
   buildProxyRequestInit,
   createApiTarget,
+  fetchProxiedApiResponse,
+  formatApiProxyLog,
   isApiPath,
   isAllowedAppPermission,
   isAppUrl,

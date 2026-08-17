@@ -14,9 +14,11 @@ const {
   APP_SCHEME,
   APP_CONTENT_SECURITY_POLICY,
   APP_URL,
+  ApiProxyTimeoutError,
   DESKTOP_USER_AGENT,
-  buildProxyRequestInit,
   createApiTarget,
+  fetchProxiedApiResponse,
+  formatApiProxyLog,
   isApiPath,
   isAllowedAppPermission,
   isAppUrl,
@@ -174,10 +176,22 @@ function cleanupSmokeProfile() {
  */
 async function proxyApiRequest(request, requestUrl) {
   const target = createApiTarget(requestUrl);
-  const init = await buildProxyRequestInit(request);
+  const startedAt = Date.now();
 
-  logStartup(`Proxying API request: ${request.method} ${target.pathname}`);
-  return net.fetch(target.toString(), init);
+  try {
+    const response = await fetchProxiedApiResponse(request, requestUrl, net.fetch);
+    logStartup(formatApiProxyLog(request.method, target.pathname, response.status, Date.now() - startedAt));
+    return response;
+  } catch (err) {
+    const outcome =
+      err instanceof ApiProxyTimeoutError
+        ? "timeout"
+        : err instanceof Error && err.name === "AbortError"
+          ? "aborted"
+          : "failed";
+    logStartup(formatApiProxyLog(request.method, target.pathname, outcome, Date.now() - startedAt));
+    throw err;
+  }
 }
 
 /** @param {Request} request */
@@ -197,7 +211,9 @@ async function handleAppRequest(request) {
     try {
       return await proxyApiRequest(request, requestUrl);
     } catch (err) {
-      logStartup(`API proxy error: ${formatError(err)}`);
+      if (err instanceof ApiProxyTimeoutError) {
+        return errorResponse(504, "NET04: The PokeRogue API request timed out.");
+      }
       return errorResponse(502, "NET01: The PokeRogue API could not be reached.");
     }
   }
