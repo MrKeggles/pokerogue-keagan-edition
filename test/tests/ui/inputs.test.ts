@@ -1,3 +1,4 @@
+import { Button } from "#enums/buttons";
 import { CFG_KEYBOARD_QWERTY } from "#inputs/cfg-keyboard-qwerty";
 import { PAD_XBOX360 } from "#inputs/pad-xbox360";
 import { GameManager } from "#test/framework/game-manager";
@@ -43,6 +44,7 @@ describe("Inputs", () => {
   it("Mobile - test touch holding for 300ms - 2 input", async () => {
     await game.inputsHandler.pressTouch("dpadUp", 300);
     expect(game.inputsHandler.log.length).toBe(2);
+    expect(game.inputsHandler.log.map(event => event.repeat)).toEqual([false, true]);
   });
 
   it("Mobile - test touch holding for 1000ms - 4 input", async () => {
@@ -58,11 +60,46 @@ describe("Inputs", () => {
   it("keyboard - test input holding for 300ms - 2 input", async () => {
     await game.inputsHandler.pressKeyboardKey(CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP, 300);
     expect(game.inputsHandler.log.length).toBe(2);
+    expect(game.inputsHandler.log.map(event => event.repeat)).toEqual([false, true]);
   });
 
   it("keyboard - test input holding for 1000ms - 4 input", async () => {
     await game.inputsHandler.pressKeyboardKey(CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP, 1050);
     expect(game.inputsHandler.log.length).toBe(5);
+  });
+
+  it("keyboard - ignores a stray keyup without unlocking another held button", () => {
+    const inputController = game.scene.inputController as unknown as { buttonLock: Button[] };
+    game.scene.input.keyboard?.emit("keydown", { keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP });
+
+    expect(inputController.buttonLock).toEqual([Button.UP]);
+
+    game.scene.input.keyboard?.emit("keyup", { keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_DOWN });
+    expect(inputController.buttonLock).toEqual([Button.UP]);
+
+    game.scene.input.keyboard?.emit("keyup", { keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP });
+  });
+
+  it("keyboard - ignores a native repeat after pressed state is cleared", () => {
+    const inputController = game.scene.inputController as unknown as {
+      buttonLock: Button[];
+      deactivatePressedKey: () => void;
+    };
+
+    game.scene.input.keyboard?.emit("keydown", {
+      keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP,
+      repeat: false,
+    });
+    inputController.deactivatePressedKey();
+    game.scene.input.keyboard?.emit("keydown", {
+      keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP,
+      repeat: true,
+    });
+
+    expect(game.inputsHandler.log).toHaveLength(1);
+    expect(game.inputsHandler.log[0].repeat).toBe(false);
+    expect(inputController.buttonLock).toEqual([]);
+    game.scene.input.keyboard?.emit("keyup", { keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP });
   });
 
   it("gamepad - test input holding for 1ms - 1 input", async () => {
@@ -78,6 +115,7 @@ describe("Inputs", () => {
   it("gamepad - test input holding for 300ms - 2 input", async () => {
     await game.inputsHandler.pressGamepadButton(PAD_XBOX360.deviceMapping.RC_S, 300);
     expect(game.inputsHandler.log.length).toBe(2);
+    expect(game.inputsHandler.log.map(event => event.repeat)).toEqual([false, true]);
   });
 
   it("gamepad - test input holding for 1000ms - 4 input", async () => {

@@ -113,12 +113,12 @@ export class TouchControl {
     if (this.buttonLock.includes(key)) {
       return;
     }
-    if (!this.simulateKeyboardEvent("keydown", key)) {
+    if (!this.simulateKeyboardEvent("keydown", key, false)) {
       return;
     }
     clearInterval(this.inputInterval[key]);
     this.inputInterval[key] = setInterval(() => {
-      if (!this.simulateKeyboardEvent("keydown", key)) {
+      if (!this.simulateKeyboardEvent("keydown", key, true)) {
         clearInterval(this.inputInterval[key]);
       }
     }, repeatInputDelayMillis);
@@ -150,7 +150,7 @@ export class TouchControl {
    * This function checks if the key exists in the Button enum. If it does, it retrieves the corresponding button
    * and emits the appropriate event ('input_down' or 'input_up') based on the event type.
    */
-  simulateKeyboardEvent(eventType: string, key: string): boolean {
+  simulateKeyboardEvent(eventType: string, key: string, repeat = false): boolean {
     if (!Object.hasOwn(Button, key) || this.disabled) {
       return false;
     }
@@ -162,6 +162,7 @@ export class TouchControl {
           controller_type: "keyboard",
           button,
           isTouch: true,
+          repeat,
         });
         break;
       case "keyup":

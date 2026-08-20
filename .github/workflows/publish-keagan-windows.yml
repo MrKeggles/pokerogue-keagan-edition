@@ -85,11 +85,12 @@ jobs:
           $assets = @(
             Get-ChildItem -LiteralPath $releaseDir -Filter '*-nsis.exe' -File
             Get-ChildItem -LiteralPath $releaseDir -Filter '*-nsis.exe.blockmap' -File
+            Get-ChildItem -LiteralPath $releaseDir -Filter '*-portable.exe' -File
             Get-ChildItem -LiteralPath $releaseDir -Filter 'latest.yml' -File
             Get-ChildItem -LiteralPath $releaseDir -Filter '*-source.zip' -File
           )
-          if ($assets.Count -ne 4) {
-            throw "Expected installer, blockmap, latest.yml, and source archive; found $($assets.Count) files."
+          if ($assets.Count -ne 5) {
+            throw "Expected installer, blockmap, portable executable, latest.yml, and source archive; found $($assets.Count) files."
           }
 
           $arguments = @(

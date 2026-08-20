@@ -305,15 +305,17 @@ export class EncounterPhase extends BattlePhase {
 
   /**
    * Persist the new wave before starting it without leaving the phase wedged
-   * if storage or the API fails. Read-only verification outages and ambiguous
-   * remote writes are treated as successful by `saveAll` once a local snapshot
-   * exists; other failures return to the title screen instead of retrying a
-   * potentially-completed POST.
+   * if storage or the API fails. Local-only encounter saves do not wait for a
+   * remote verification after their snapshot is safely persisted; scheduled
+   * remote syncs retain the normal conflict detection and reconciliation flow.
+   * Ambiguous remote writes are treated as successful by `saveAll` once a local
+   * snapshot exists; other failures return to the title screen instead of
+   * retrying a potentially-completed POST.
    */
   private async saveAndContinueEncounter(sync: boolean): Promise<void> {
     let success = false;
     try {
-      success = await globalScene.gameData.saveAll(true, sync);
+      success = await globalScene.gameData.saveAll(true, sync, false, false, sync);
     } catch (err) {
       console.error("Could not save before the encounter; returning to the title screen.", err);
     } finally {

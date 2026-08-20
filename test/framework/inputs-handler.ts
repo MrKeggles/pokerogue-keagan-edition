@@ -10,6 +10,7 @@ import Phaser from "phaser";
 interface LogEntry {
   type: string;
   button: any;
+  repeat?: boolean;
 }
 
 export class InputsHandler {
@@ -69,7 +70,7 @@ export class InputsHandler {
     this.events.on(
       "input_down",
       event => {
-        this.log.push({ type: "input_down", button: event.button });
+        this.log.push({ type: "input_down", button: event.button, repeat: event.repeat });
       },
       this,
     );

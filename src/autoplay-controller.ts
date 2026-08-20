@@ -53,6 +53,10 @@ const SAVE_SLOT_COUNT = 5;
 const STARTER_TRANSITION_TIMEOUT_MS = 10_000;
 const MYSTERY_OPTION_TIMEOUT_MS = 10_000;
 const LEARN_MOVE_SELECTION_TIMEOUT_MS = 10_000;
+export const AUTOPLAY_STALL_TIMEOUT_MS = 60_000;
+const AUTOPLAY_ERROR_RETRY_LIMIT = 3;
+const AUTOPLAY_PLANNER_ERROR_LIMIT = 3;
+const AUTOPLAY_FALLBACK_FAILURE_LIMIT = 3;
 
 export const DEFAULT_AUTOPLAY_STARTER_IDS = [SpeciesId.BULBASAUR, SpeciesId.CHARMANDER, SpeciesId.SQUIRTLE] as const;
 
@@ -70,6 +74,19 @@ const TARGET_HALF_HP_MOVES = new Set<MoveId>([MoveId.SUPER_FANG, MoveId.NATURES_
 export type AfkTemplateName = "FAST_FARM" | "SAFE_CLIMB" | "BOSS_PUSH";
 
 export type PendingStarterIntent = "ADD_DEFAULT_STARTER" | "CONFIRM_STARTER_TEAM" | "AWAIT_SAVE_SLOT";
+
+export type AutoplayStopRuleKind = "MAX_RUNS" | "TARGET_SPECIES" | "WAVE_RANGE";
+
+interface AutoplayInputEvent {
+  button?: Button;
+  controller_type?: string;
+  repeat?: boolean;
+}
+
+interface AutoplayStopRuleMatch {
+  kind: AutoplayStopRuleKind;
+  reason: string;
+}
 
 export type StarterFlowEvent = "SUBMIT_TEAM" | "CONFIRM" | "STARTER_SELECT" | "SAVE_SLOT";
 
@@ -541,6 +558,14 @@ export function shouldHandleAutoplayHotkey(event: Pick<KeyboardEvent, "code" | "
   return (event.code === TOGGLE_KEY || event.code === TOGGLE_TEMPLATE_KEY) && !event.repeat;
 }
 
+/** Held-input repeat events are not a new manual takeover after autoplay has been enabled. */
+export function shouldPauseAutoplayForManualInput(
+  enabled: boolean,
+  event?: Pick<AutoplayInputEvent, "repeat">,
+): boolean {
+  return enabled && event?.repeat !== true;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -707,6 +732,7 @@ export class AutoplayController {
   private stats: AfkSessionStats;
   private manualOverride = false;
   private statusNote = "";
+  private runtimeStatus = "INITIALIZING";
   private nextActionAt = 0;
   private lastUpdateTime = 0;
   private lastStatsPersistAt = 0;
@@ -727,6 +753,20 @@ export class AutoplayController {
   private pendingLearnMovePhase: LearnMovePhase | null = null;
   private pendingLearnMoveSelectionStartedAt = 0;
   private learnMoveSelectionSubmitted = false;
+  private progressSignature = "";
+  private progressPhase: unknown = null;
+  private progressObservedAt: number | null = null;
+  private pausedStopRuleKind: AutoplayStopRuleKind | null = null;
+  private readonly bypassedStopRules = new Set<AutoplayStopRuleKind>();
+  private plannerBattle: unknown = null;
+  private plannerBattleWave = -1;
+  private plannerErrorCount = 0;
+  private plannerCircuitOpen = false;
+  private forceStruggleNextCommand = false;
+  private forcedStruggleTargetIndex: BattlerIndex | null = null;
+  private fallbackSubmissionFailures = 0;
+  private unexpectedActErrorCount = 0;
+  private unexpectedActErrorSignature = "";
   private readonly shinySeenThisRun = new Set<number>();
   private readonly badge: HTMLDivElement;
   private readonly keydownHandler = (event: KeyboardEvent): void => {
@@ -747,12 +787,18 @@ export class AutoplayController {
       return;
     }
 
-    if (event.code !== TOGGLE_KEY && event.code !== TOGGLE_TEMPLATE_KEY && this.enabled) {
+    if (
+      event.code !== TOGGLE_KEY
+      && event.code !== TOGGLE_TEMPLATE_KEY
+      && this.enabled
+      && !event.repeat
+      && !event.isComposing
+    ) {
       this.setEnabled(false, true);
     }
   };
-  private readonly manualInputHandler = (): void => {
-    if (!this.enabled) {
+  private readonly manualInputHandler = (event?: AutoplayInputEvent): void => {
+    if (!shouldPauseAutoplayForManualInput(this.enabled, event)) {
       return;
     }
     this.setEnabled(false, true);
@@ -802,28 +848,88 @@ export class AutoplayController {
     }
 
     if (this.enabled) {
-      this.accumulateAfkTime(time);
-      this.observeRunLifecycle();
-      this.maybeNotifyShinyEncounter();
+      try {
+        this.accumulateAfkTime(time);
+        this.observeRunLifecycle();
+        this.maybeNotifyShinyEncounter();
 
-      const autoPauseReason = this.getAutoPauseReason();
-      if (autoPauseReason) {
-        this.setEnabled(false, false, autoPauseReason);
-        return;
-      }
+        const autoPauseReason = this.getAutoPauseReason();
+        if (autoPauseReason) {
+          this.setEnabled(false, false, autoPauseReason);
+          return;
+        }
 
-      if (time >= this.nextActionAt) {
-        this.nextActionAt = time + this.getTemplateSettings().actionDelayMs;
-        this.act();
-      }
+        if (this.pauseIfStalled(time)) {
+          return;
+        }
 
-      if (time - this.lastStatsPersistAt >= 5000) {
-        this.storeStats();
-        this.lastStatsPersistAt = time;
+        if (time >= this.nextActionAt) {
+          this.nextActionAt = time + this.getTemplateSettings().actionDelayMs;
+          this.act();
+          this.clearUnexpectedActError();
+        }
+
+        if (time - this.lastStatsPersistAt >= 5000) {
+          this.storeStats();
+          this.lastStatsPersistAt = time;
+        }
+      } catch (error) {
+        this.handleUnexpectedActError(error);
       }
     }
 
     this.lastUpdateTime = time;
+  }
+
+  /**
+   * Treats a phase, UI mode, or wave change as forward progress. Remaining in the exact same
+   * interactive state for a full minute is almost certainly a rejected input or unsupported UI,
+   * but still leaves enough room for ordinary animations and remote loading.
+   */
+  private pauseIfStalled(time: number): boolean {
+    const phase = globalScene.phaseManager.getCurrentPhase() as unknown as { phaseName?: string } | undefined;
+    const mode = globalScene.ui.getMode();
+    const phaseName = phase?.phaseName ?? "NO_PHASE";
+    const modeName = UiMode[mode] ?? `MODE_${mode}`;
+    const wave = globalScene.currentBattle?.waveIndex ?? 0;
+    const signature = `${phaseName}/${modeName}/W${wave}`;
+
+    // Loading and the unavailable modal advance through their own async callbacks (including
+    // reconnect backoff). Keep the watchdog fresh while they work so AFK resumes automatically
+    // instead of converting a temporary network outage into a permanent manual pause.
+    if (mode === UiMode.LOADING || mode === UiMode.UNAVAILABLE) {
+      const waitingStatus = `WAITING: ${signature}`;
+      const statusChanged = this.runtimeStatus !== waitingStatus;
+      this.runtimeStatus = waitingStatus;
+      this.progressSignature = signature;
+      this.progressPhase = phase;
+      this.progressObservedAt = time;
+      if (statusChanged) {
+        this.updateBadge();
+      }
+      return false;
+    }
+
+    this.runtimeStatus = signature;
+    if (
+      signature !== this.progressSignature
+      || phase !== this.progressPhase
+      || this.progressObservedAt == null
+      || time < this.progressObservedAt
+    ) {
+      this.progressSignature = signature;
+      this.progressPhase = phase;
+      this.progressObservedAt = time;
+      this.updateBadge();
+      return false;
+    }
+
+    if (time - this.progressObservedAt < AUTOPLAY_STALL_TIMEOUT_MS) {
+      return false;
+    }
+
+    this.pauseForSafety(`STALLED: ${phaseName}/${modeName}`);
+    return true;
   }
 
   private act(): void {
@@ -848,43 +954,7 @@ export class AutoplayController {
     if (phase instanceof CommandPhase && (mode === UiMode.COMMAND || mode === UiMode.FIGHT)) {
       this.allowNextOptionSelectAction = false;
       this.allowNextMenuOptionSelectAction = false;
-      const playerPokemon = phase.getPokemon();
-      const opponents = this.getActiveOpponents();
-      const bestMove = this.chooseMove(playerPokemon);
-      const switchChoice = this.suppressNextSwitchAttempt
-        ? null
-        : this.chooseSwitch(playerPokemon, opponents, bestMove.score);
-      const switchPlan = planSwitchAttempt(this.suppressNextSwitchAttempt, switchChoice?.index ?? null);
-
-      if (switchPlan.kind === "FIGHT_WITHOUT_SWITCH") {
-        this.suppressNextSwitchAttempt = false;
-      } else if (switchPlan.kind === "ATTEMPT") {
-        const switchAccepted = phase.handleCommand(Command.POKEMON, switchPlan.switchIndex, false);
-        const switchOutcome = resolveSwitchAttempt(switchAccepted);
-        this.suppressNextSwitchAttempt = switchOutcome.suppressNextSwitch;
-        this.pendingTargetIndex = null;
-        return;
-      }
-
-      this.pendingTargetIndex = bestMove.targetIndex ?? opponents[0]?.getBattlerIndex() ?? null;
-      const movesetLength = playerPokemon.getMoveset().length;
-      const fightCursor = getFightCursor(bestMove.index, movesetLength);
-
-      let commandAccepted: boolean;
-      if (fightCursor === -1) {
-        const targets = this.pendingTargetIndex == null ? [] : [this.pendingTargetIndex];
-        commandAccepted = phase.handleCommand(Command.FIGHT, -1, MoveUseMode.IGNORE_PP, {
-          move: MoveId.STRUGGLE,
-          targets,
-          useMode: MoveUseMode.IGNORE_PP,
-        });
-      } else {
-        commandAccepted = phase.handleCommand(Command.FIGHT, fightCursor);
-      }
-
-      if (!commandAccepted) {
-        this.pendingTargetIndex = null;
-      }
+      this.handleBattleCommand(phase);
       return;
     }
 
@@ -897,6 +967,9 @@ export class AutoplayController {
         break;
       case UiMode.MESSAGE:
         globalScene.ui.processInput(Button.ACTION);
+        break;
+      case UiMode.BALL:
+        globalScene.ui.processInput(Button.CANCEL);
         break;
       case UiMode.MODIFIER_SELECT:
         this.handleModifierSelectMode();
@@ -922,6 +995,9 @@ export class AutoplayController {
         break;
       case UiMode.ALERT_MODAL:
         this.pauseForSafety("ALERT REQUIRES REVIEW");
+        break;
+      case UiMode.UNAVAILABLE:
+        // The modal owns an automatic reconnect loop; wait without consuming its input.
         break;
       case UiMode.LOGIN_OR_REGISTER:
       case UiMode.LOGIN_FORM:
@@ -965,6 +1041,229 @@ export class AutoplayController {
           globalScene.ui.processInput(Button.CANCEL);
         }
         break;
+      case UiMode.TEST_DIALOGUE:
+        globalScene.ui.processInput(Button.ACTION);
+        break;
+      case UiMode.LOADING:
+      case UiMode.COMMAND:
+      case UiMode.FIGHT:
+        // These are transient until loading finishes or the matching CommandPhase becomes current.
+        break;
+    }
+  }
+
+  private handleBattleCommand(phase: CommandPhase): void {
+    this.resetPlannerCircuitForNewBattle();
+    if (this.plannerCircuitOpen || this.forceStruggleNextCommand) {
+      const targetIndex = this.forcedStruggleTargetIndex;
+      this.forceStruggleNextCommand = false;
+      this.forcedStruggleTargetIndex = null;
+      this.submitForcedStruggle(phase, targetIndex);
+      return;
+    }
+
+    let playerPokemon: PlayerPokemon;
+    let opponents: Pokemon[] = [];
+    let bestMove: MoveChoice;
+    let switchChoice: SwitchChoice | null;
+    try {
+      playerPokemon = phase.getPokemon();
+      opponents = this.getActiveOpponents();
+      bestMove = this.chooseMove(playerPokemon);
+      switchChoice = this.suppressNextSwitchAttempt
+        ? null
+        : this.chooseSwitch(playerPokemon, opponents, bestMove.score);
+    } catch (error) {
+      this.handlePlannerError(phase, opponents, error);
+      return;
+    }
+
+    this.clearPlannerErrorsAfterSuccess();
+    const switchPlan = planSwitchAttempt(this.suppressNextSwitchAttempt, switchChoice?.index ?? null);
+    if (switchPlan.kind === "FIGHT_WITHOUT_SWITCH") {
+      this.suppressNextSwitchAttempt = false;
+    } else if (switchPlan.kind === "ATTEMPT") {
+      const switchAccepted = phase.handleCommand(Command.POKEMON, switchPlan.switchIndex, false);
+      const switchOutcome = resolveSwitchAttempt(switchAccepted);
+      this.suppressNextSwitchAttempt = switchOutcome.suppressNextSwitch;
+      this.pendingTargetIndex = null;
+      return;
+    }
+
+    this.pendingTargetIndex = bestMove.targetIndex ?? opponents[0]?.getBattlerIndex() ?? null;
+    const movesetLength = playerPokemon.getMoveset().length;
+    const fightCursor = getFightCursor(bestMove.index, movesetLength);
+
+    let commandAccepted: boolean;
+    if (fightCursor === -1) {
+      const targets = this.pendingTargetIndex == null ? [] : [this.pendingTargetIndex];
+      commandAccepted = phase.handleCommand(Command.FIGHT, -1, MoveUseMode.IGNORE_PP, {
+        move: MoveId.STRUGGLE,
+        targets,
+        useMode: MoveUseMode.IGNORE_PP,
+      });
+    } else {
+      commandAccepted = phase.handleCommand(Command.FIGHT, fightCursor);
+    }
+
+    if (commandAccepted) {
+      this.fallbackSubmissionFailures = 0;
+    } else {
+      this.pendingTargetIndex = null;
+      this.forceStruggleNextCommand = true;
+      try {
+        this.forcedStruggleTargetIndex = opponents[0]?.getBattlerIndex() ?? null;
+      } catch {
+        this.forcedStruggleTargetIndex = null;
+      }
+    }
+  }
+
+  private resetPlannerCircuitForNewBattle(): void {
+    const battle = globalScene.currentBattle;
+    const wave = battle?.waveIndex ?? 0;
+    if (battle === this.plannerBattle && wave === this.plannerBattleWave) {
+      return;
+    }
+
+    this.plannerBattle = battle;
+    this.plannerBattleWave = wave;
+    this.plannerErrorCount = 0;
+    this.plannerCircuitOpen = false;
+    this.forceStruggleNextCommand = false;
+    this.forcedStruggleTargetIndex = null;
+    this.fallbackSubmissionFailures = 0;
+    if (this.statusNote.startsWith("BATTLE FALLBACK")) {
+      this.statusNote = "";
+      this.updateBadge();
+    }
+  }
+
+  private clearPlannerErrorsAfterSuccess(): void {
+    if (this.plannerErrorCount === 0 && this.fallbackSubmissionFailures === 0) {
+      return;
+    }
+
+    this.plannerErrorCount = 0;
+    this.fallbackSubmissionFailures = 0;
+    if (this.statusNote.startsWith("BATTLE FALLBACK")) {
+      this.statusNote = "";
+      this.updateBadge();
+    }
+  }
+
+  private handlePlannerError(phase: CommandPhase, opponents: Pokemon[], error: unknown): void {
+    this.plannerErrorCount++;
+    this.plannerCircuitOpen = this.plannerErrorCount >= AUTOPLAY_PLANNER_ERROR_LIMIT;
+    this.statusNote = this.plannerCircuitOpen
+      ? "BATTLE FALLBACK ACTIVE"
+      : `BATTLE FALLBACK ${this.plannerErrorCount}/${AUTOPLAY_PLANNER_ERROR_LIMIT}`;
+    this.updateBadge();
+
+    if (this.plannerErrorCount === 1) {
+      console.error("[Autoplay] battle planning failed; submitting forced Struggle", error);
+    } else if (this.plannerCircuitOpen) {
+      console.warn("[Autoplay] battle planner circuit opened for the rest of this battle");
+    }
+    let targetIndex: BattlerIndex | null = null;
+    try {
+      targetIndex = opponents[0]?.getBattlerIndex() ?? null;
+    } catch {
+      // Fall back to the live enemy field below when the captured opponent is no longer readable.
+    }
+    this.submitForcedStruggle(phase, targetIndex);
+  }
+
+  private submitForcedStruggle(phase: CommandPhase, preferredTargetIndex: BattlerIndex | null = null): void {
+    let targets: BattlerIndex[] = preferredTargetIndex == null ? [] : [preferredTargetIndex];
+    if (targets.length === 0) {
+      try {
+        const opponent = globalScene.getEnemyField().find(candidate => candidate?.isActive(true));
+        if (opponent) {
+          targets = [opponent.getBattlerIndex()];
+        }
+      } catch {
+        // Count an unresolved live target as a recovery failure below.
+      }
+    }
+
+    if (targets.length === 0) {
+      this.recordFallbackSubmissionFailure(null);
+      return;
+    }
+
+    let accepted = false;
+    try {
+      accepted = phase.handleCommand(Command.FIGHT, -1, MoveUseMode.IGNORE_PP, {
+        move: MoveId.STRUGGLE,
+        targets,
+        useMode: MoveUseMode.IGNORE_PP,
+      });
+    } catch (error) {
+      if (this.fallbackSubmissionFailures === 0) {
+        console.error("[Autoplay] forced Struggle submission threw", error);
+      }
+    }
+
+    this.pendingTargetIndex = null;
+    if (accepted) {
+      this.fallbackSubmissionFailures = 0;
+      this.forceStruggleNextCommand = false;
+      this.forcedStruggleTargetIndex = null;
+      return;
+    }
+
+    this.recordFallbackSubmissionFailure(targets[0]);
+  }
+
+  private recordFallbackSubmissionFailure(targetIndex: BattlerIndex | null): void {
+    this.pendingTargetIndex = null;
+    this.fallbackSubmissionFailures++;
+    if (this.fallbackSubmissionFailures >= AUTOPLAY_FALLBACK_FAILURE_LIMIT) {
+      this.pauseForSafety("BATTLE FALLBACK FAILED: CommandPhase/COMMAND");
+      return;
+    }
+    this.forceStruggleNextCommand = true;
+    this.forcedStruggleTargetIndex = targetIndex;
+  }
+
+  private handleUnexpectedActError(error: unknown): void {
+    let signature = "UNKNOWN/UNKNOWN";
+    try {
+      const phase = globalScene.phaseManager.getCurrentPhase() as unknown as { phaseName?: string } | undefined;
+      const mode = globalScene.ui.getMode();
+      signature = `${phase?.phaseName ?? "NO_PHASE"}/${UiMode[mode] ?? `MODE_${mode}`}`;
+    } catch {
+      // Retain the fallback signature when diagnostic state is itself unavailable.
+    }
+
+    if (signature !== this.unexpectedActErrorSignature) {
+      this.unexpectedActErrorSignature = signature;
+      this.unexpectedActErrorCount = 0;
+    }
+    this.unexpectedActErrorCount++;
+
+    if (this.unexpectedActErrorCount === 1) {
+      console.error(`[Autoplay] unexpected error in ${signature}; retrying`, error);
+    }
+    if (this.unexpectedActErrorCount >= AUTOPLAY_ERROR_RETRY_LIMIT) {
+      this.pauseForSafety(`AUTOPLAY ERROR: ${signature}`);
+      return;
+    }
+
+    this.statusNote = `ERROR RETRY ${this.unexpectedActErrorCount}/${AUTOPLAY_ERROR_RETRY_LIMIT}`;
+    this.updateBadge();
+  }
+
+  private clearUnexpectedActError(): void {
+    if (this.unexpectedActErrorCount === 0) {
+      return;
+    }
+    this.unexpectedActErrorCount = 0;
+    this.unexpectedActErrorSignature = "";
+    if (this.statusNote.startsWith("ERROR RETRY")) {
+      this.statusNote = "";
+      this.updateBadge();
     }
   }
 
@@ -1066,37 +1365,41 @@ export class AutoplayController {
   ): void {
     if (mode === UiMode.OPTION_SELECT && this.pendingStarterIntent === "ADD_DEFAULT_STARTER") {
       const handler = globalScene.ui.getHandler() as BaseOptionSelectUiHandler;
-      const selectedLabel = handler.getOptionsWithScroll()[handler.getCursor()]?.label;
-      if (
-        isExpectedStarterAddOption(
-          phaseName,
-          this.pendingStarterIntent,
-          selectedLabel,
-          i18next.t("starterSelectUiHandler:addToParty"),
-        )
-      ) {
-        this.pendingStarterIntent = null;
-        this.pendingStarterIntentStartedAt = 0;
-        globalScene.ui.processInput(Button.ACTION);
+      const expectedLabel = i18next.t("starterSelectUiHandler:addToParty");
+      const options = handler.getOptionsWithScroll();
+      const selectedLabel = options[handler.getCursor()]?.label;
+      if (isExpectedStarterAddOption(phaseName, this.pendingStarterIntent, selectedLabel, expectedLabel)) {
+        if (globalScene.ui.processInput(Button.ACTION)) {
+          this.pendingStarterIntent = null;
+          this.pendingStarterIntentStartedAt = 0;
+        } else {
+          this.waitForPendingStarterTransition();
+        }
         return;
       }
 
-      this.pendingStarterIntent = null;
-      this.pendingStarterIntentStartedAt = 0;
-      this.pauseForSafety("DEFAULT STARTER UNAVAILABLE");
+      const expectedIndex = options.findIndex(option => option.label === expectedLabel);
+      if (phaseName === "SelectStarterPhase" && expectedIndex >= 0) {
+        handler.setCursor(expectedIndex);
+        return;
+      }
+
+      this.waitForPendingStarterTransition();
       return;
     }
 
     const authorized =
       mode === UiMode.OPTION_SELECT ? this.allowNextOptionSelectAction : this.allowNextMenuOptionSelectAction;
-    if (mode === UiMode.OPTION_SELECT) {
-      this.allowNextOptionSelectAction = false;
-    } else {
-      this.allowNextMenuOptionSelectAction = false;
-    }
 
     if (isSafeOptionSelectContext(mode, phaseName, authorized)) {
-      globalScene.ui.processInput(Button.ACTION);
+      const accepted = globalScene.ui.processInput(Button.ACTION);
+      if (accepted && authorized) {
+        if (mode === UiMode.OPTION_SELECT) {
+          this.allowNextOptionSelectAction = false;
+        } else {
+          this.allowNextMenuOptionSelectAction = false;
+        }
+      }
       return;
     }
     this.pauseForSafety("OPTION REVIEW REQUIRED");
@@ -1107,7 +1410,6 @@ export class AutoplayController {
 
     if (phase?.phaseName === "SelectStarterPhase") {
       const transition = planStarterFlowTransition(this.pendingStarterIntent, "CONFIRM");
-      this.pendingStarterIntent = transition.nextIntent;
 
       if (transition.kind === "WAIT") {
         this.waitForPendingStarterTransition();
@@ -1118,9 +1420,13 @@ export class AutoplayController {
         return;
       }
 
-      this.pendingStarterIntentStartedAt = Date.now();
-      this.buildingDefaultStarterTeam = false;
-      globalScene.ui.processInput(Button.ACTION);
+      if (globalScene.ui.processInput(Button.ACTION)) {
+        this.pendingStarterIntent = transition.nextIntent;
+        this.pendingStarterIntentStartedAt = Date.now();
+        this.buildingDefaultStarterTeam = false;
+      } else {
+        this.waitForPendingStarterTransition();
+      }
       return;
     }
 
@@ -1609,10 +1915,12 @@ export class AutoplayController {
   }
 
   private getAutoPauseReason(): string | null {
-    const stopReason = this.getSmartStopReason();
-    if (stopReason) {
-      return stopReason;
+    const stopRule = this.getSmartStopMatch();
+    if (stopRule) {
+      this.pausedStopRuleKind = stopRule.kind;
+      return stopRule.reason;
     }
+    this.pausedStopRuleKind = null;
 
     const template = this.getTemplateSettings();
     const opponents = this.getActiveOpponents();
@@ -1624,33 +1932,40 @@ export class AutoplayController {
     return null;
   }
 
-  private getSmartStopReason(): string | null {
+  private getSmartStopMatch(): AutoplayStopRuleMatch | null {
     if (!this.stopRules.enabled) {
+      this.bypassedStopRules.clear();
       return null;
     }
 
     const wave = globalScene.currentBattle?.waveIndex ?? 0;
-
-    if (hasReachedCompletedRunLimit(this.completedRunsThisSession, this.stopRules.stopAfterRuns)) {
-      return "STOP RULE: MAX RUNS";
-    }
-
-    if (this.stopRules.waveRangeStart > 0) {
-      const rangeEnd = this.stopRules.waveRangeEnd > 0 ? this.stopRules.waveRangeEnd : this.stopRules.waveRangeStart;
-      if (wave >= this.stopRules.waveRangeStart && wave <= rangeEnd) {
-        return `STOP RULE: WAVE ${wave}`;
-      }
-    }
-
-    if (this.stopRules.targetSpeciesIds.length > 0) {
-      const hasTarget = this.getActiveOpponents().some(opponent =>
+    const rangeEnd = this.stopRules.waveRangeEnd > 0 ? this.stopRules.waveRangeEnd : this.stopRules.waveRangeStart;
+    const activeRules: Record<AutoplayStopRuleKind, AutoplayStopRuleMatch | null> = {
+      MAX_RUNS: hasReachedCompletedRunLimit(this.completedRunsThisSession, this.stopRules.stopAfterRuns)
+        ? { kind: "MAX_RUNS", reason: "STOP RULE: MAX RUNS" }
+        : null,
+      WAVE_RANGE:
+        this.stopRules.waveRangeStart > 0 && wave >= this.stopRules.waveRangeStart && wave <= rangeEnd
+          ? { kind: "WAVE_RANGE", reason: `STOP RULE: WAVE ${wave}` }
+          : null,
+      TARGET_SPECIES: this.getActiveOpponents().some(opponent =>
         this.stopRules.targetSpeciesIds.includes(opponent.species.speciesId),
-      );
-      if (hasTarget) {
-        return "STOP RULE: TARGET SPECIES";
+      )
+        ? { kind: "TARGET_SPECIES", reason: "STOP RULE: TARGET SPECIES" }
+        : null,
+    };
+
+    for (const kind of this.bypassedStopRules) {
+      if (activeRules[kind] == null) {
+        this.bypassedStopRules.delete(kind);
       }
     }
 
+    for (const kind of ["MAX_RUNS", "WAVE_RANGE", "TARGET_SPECIES"] as const) {
+      if (activeRules[kind] != null && !this.bypassedStopRules.has(kind)) {
+        return activeRules[kind];
+      }
+    }
     return null;
   }
 
@@ -1670,11 +1985,12 @@ export class AutoplayController {
     const plan = planTitleSelection(globalScene.sessionSlotId >= 0);
     titleHandler.setCursor(plan.cursor);
 
-    this.allowNextOptionSelectAction = plan.authorizeGameModeOption;
     this.pendingStarterIntent = null;
     this.pendingStarterIntentStartedAt = 0;
     this.buildingDefaultStarterTeam = false;
-    globalScene.ui.processInput(Button.ACTION);
+    this.allowNextOptionSelectAction = globalScene.ui.processInput(Button.ACTION)
+      ? plan.authorizeGameModeOption
+      : false;
   }
 
   private handleSaveSlotMode(): void {
@@ -1730,10 +2046,10 @@ export class AutoplayController {
       return;
     }
 
-    if (handler.uiMode === SaveSlotUiMode.LOAD) {
+    const accepted = globalScene.ui.processInput(Button.ACTION);
+    if (handler.uiMode === SaveSlotUiMode.LOAD && accepted) {
       this.allowNextMenuOptionSelectAction = true;
     }
-    globalScene.ui.processInput(Button.ACTION);
   }
 
   private handleStarterSelectMode(): void {
@@ -1750,9 +2066,18 @@ export class AutoplayController {
 
     if (plan.kind === "SELECT_STARTER") {
       starterHandler.prepareDefaultStarterSelection(plan.cursor);
+      const handled = globalScene.ui.processInput(Button.ACTION);
+      if (!handled) {
+        return;
+      }
+      // Starter input reports handled errors as `true`, too. Opening this menu is synchronous,
+      // so verify the actual transition before authorizing its Add to Party action.
+      if (globalScene.ui.getMode() !== UiMode.OPTION_SELECT) {
+        this.pauseForSafety("DEFAULT STARTER UNAVAILABLE");
+        return;
+      }
       this.pendingStarterIntent = "ADD_DEFAULT_STARTER";
       this.pendingStarterIntentStartedAt = Date.now();
-      globalScene.ui.processInput(Button.ACTION);
       return;
     }
 
@@ -1762,9 +2087,15 @@ export class AutoplayController {
       return;
     }
 
-    this.pendingStarterIntent = submitTransition.nextIntent;
-    this.pendingStarterIntentStartedAt = Date.now();
-    globalScene.ui.processInput(Button.SUBMIT);
+    if (!starterHandler.isPartyValid()) {
+      this.pauseForSafety("STARTER TEAM INVALID");
+      return;
+    }
+
+    if (globalScene.ui.processInput(Button.SUBMIT)) {
+      this.pendingStarterIntent = submitTransition.nextIntent;
+      this.pendingStarterIntentStartedAt = Date.now();
+    }
   }
 
   private waitForPendingStarterTransition(): void {
@@ -1850,7 +2181,9 @@ export class AutoplayController {
     const state = this.enabled ? "ON" : "OFF";
     const overrideState = this.manualOverride ? " [MANUAL OVERRIDE]" : "";
     const noteState = this.statusNote ? ` [${this.statusNote}]` : "";
-    this.badge.textContent = `AFK BOT ${state} [${this.template}] R:${this.stats.runsStarted}/${this.stats.runsEnded} W:${this.stats.wipes} AVG:${this.getAverageWave().toFixed(1)} T:${this.formatAfkTime()}${overrideState}${noteState} (${TOGGLE_KEY}/${TOGGLE_TEMPLATE_KEY})`;
+    const bypassState = this.bypassedStopRules.size > 0 ? ` [BYPASS:${[...this.bypassedStopRules].join("+")}]` : "";
+    const resumeHint = this.pausedStopRuleKind ? ` [${TOGGLE_KEY} BYPASSES ${this.pausedStopRuleKind}]` : "";
+    this.badge.textContent = `AFK BOT ${state} [${this.template}] [${this.runtimeStatus}] R:${this.stats.runsStarted}/${this.stats.runsEnded} W:${this.stats.wipes} AVG:${this.getAverageWave().toFixed(1)} T:${this.formatAfkTime()}${overrideState}${noteState}${bypassState}${resumeHint} (${TOGGLE_KEY}/${TOGGLE_TEMPLATE_KEY})`;
     this.badge.style.background = this.enabled ? "rgba(142, 36, 36, 0.9)" : "rgba(0, 0, 0, 0.75)";
   }
 
@@ -1860,9 +2193,24 @@ export class AutoplayController {
 
   private setEnabled(enabled: boolean, manualOverride = false, statusNote = ""): void {
     const wasEnabled = this.enabled;
+    const stopRuleToBypass = enabled && !wasEnabled ? this.pausedStopRuleKind : null;
     this.enabled = enabled;
     if (enabled && !wasEnabled) {
       this.completedRunsThisSession = 0;
+      this.unexpectedActErrorCount = 0;
+      this.unexpectedActErrorSignature = "";
+      this.fallbackSubmissionFailures = 0;
+      this.plannerBattle = null;
+      this.plannerBattleWave = -1;
+      this.plannerErrorCount = 0;
+      this.plannerCircuitOpen = false;
+      this.forceStruggleNextCommand = false;
+      this.forcedStruggleTargetIndex = null;
+      if (stopRuleToBypass) {
+        this.bypassedStopRules.add(stopRuleToBypass);
+      }
+      this.pausedStopRuleKind = null;
+      globalScene.inputController.deactivatePressedKey();
     } else if (!enabled) {
       this.allowNextOptionSelectAction = false;
       this.allowNextMenuOptionSelectAction = false;
@@ -1876,7 +2224,10 @@ export class AutoplayController {
       this.resetPendingLearnMoveSelection();
     }
     this.manualOverride = manualOverride;
-    this.statusNote = enabled ? "" : manualOverride ? "MANUAL" : statusNote;
+    this.statusNote = enabled ? "" : statusNote;
+    this.progressSignature = "";
+    this.progressPhase = null;
+    this.progressObservedAt = null;
     this.nextActionAt = 0;
     this.storeEnabled();
     this.storeStats();

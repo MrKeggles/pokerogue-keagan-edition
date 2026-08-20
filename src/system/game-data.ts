@@ -1254,6 +1254,7 @@ export class GameData {
    * @param sync - (Default `false`) Whether to sync data to the server
    * @param useCachedSession - (Default `false`) Whether to use cached session data from `localStorage` instead of generating new session data
    * @param useCachedSystem - (Default `false`) Whether to use cached system data from `localStorage` instead of generating new system data
+   * @param verifyLocalSave - (Default `true`) Whether a local-only save should wait for remote verification after the local snapshot is persisted
    * @returns A Promise that resolves with whether the save operation succeeded.
    */
   // TODO: The name of this method is extremely misleading and suggests that it saves everything across all slots
@@ -1263,6 +1264,7 @@ export class GameData {
     sync = false,
     useCachedSession = false,
     useCachedSystem = false,
+    verifyLocalSave = true,
   ): Promise<boolean> {
     if (!skipVerification) {
       const [success] = await updateUserInfo();
@@ -1325,7 +1327,7 @@ export class GameData {
 
     if (bypassLogin || !sync) {
       try {
-        return await this.verify();
+        return verifyLocalSave ? await this.verify() : true;
       } finally {
         if (sync) {
           globalScene.ui.savingIcon.hide();

@@ -5,6 +5,20 @@ SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 # PokéRogue Keagan Edition Patch Notes
 
+## Version 1.12.6 - 20 August 2026
+
+### AFK/autoplay reliability
+
+- Fixed AFK mode stopping or appearing frozen at battle starts. Ordinary encounter saves now continue after the local snapshot instead of waiting for remote verification, while scheduled sync checkpoints still perform full verification.
+- Repeated keyboard, controller, and touch input is no longer mistaken for fresh manual input, so a held or stale button cannot randomly switch AFK mode off.
+- Battle-planning errors and rejected commands now use bounded retries and a targeted Struggle fallback instead of leaving the same command phase stuck forever.
+- Added exception containment and a phase-aware watchdog with clear badge reasons for genuine stalls, while loading and automatic reconnect screens remain free to recover on their own.
+- Improved unattended navigation through title, starter, save-slot, reward, confirmation, evolution, and move-learning screens, including safe F8 resume behavior for persisted stop rules.
+
+### Updating from 1.12.5
+
+Accept the update prompt in an installed 1.12.5 build, or install version 1.12.6 over the existing copy. Login, saves, settings, and AFK statistics remain in the existing desktop profile.
+
 ## Version 1.12.5 - 17 August 2026
 
 ### Battle stability

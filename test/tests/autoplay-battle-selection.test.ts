@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { pokerogueApi } from "#api/api";
 import { AutoplayController } from "#app/autoplay-controller";
 import { allMoves } from "#data/data-lists";
 import { AbilityId } from "#enums/ability-id";
+import { Command } from "#enums/command";
 import { MoveId } from "#enums/move-id";
+import { MoveUseMode } from "#enums/move-use-mode";
 import { SpeciesId } from "#enums/species-id";
 import type { PlayerPokemon } from "#field/pokemon";
 import { GameManager } from "#test/framework/game-manager";
@@ -161,4 +164,62 @@ describe("Autoplay live battle selection", () => {
     controller.chooseMove(player);
     expect(battle.captureSeedState()).toBe(seedState);
   });
+
+  it("submits deterministic Struggle through the real command phase when native forecasting throws", async () => {
+    game.override.moveset([MoveId.TACKLE]).enemyMoveset([MoveId.SPLASH]);
+    await game.classicMode.startBattle(SpeciesId.SQUIRTLE);
+
+    const enemy = game.field.getEnemyPokemon();
+    const getAttackDamage = enemy.getAttackDamage.bind(enemy);
+    vi.spyOn(enemy, "getAttackDamage").mockImplementation(input => {
+      if (input.simulated) {
+        throw new Error("forecast failed");
+      }
+      return getAttackDamage(input);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const controller = (game.scene as unknown as { autoplayController: { act: () => void } }).autoplayController;
+    expect(() => controller.act()).not.toThrow();
+
+    expect(game.scene.currentBattle.turnCommands[0]).toMatchObject({
+      command: Command.FIGHT,
+      cursor: -1,
+      move: {
+        move: MoveId.STRUGGLE,
+        targets: [enemy.getBattlerIndex()],
+        useMode: MoveUseMode.IGNORE_PP,
+      },
+    });
+    await game.phaseInterceptor.to("EnemyCommandPhase");
+  });
+
+  it("crosses an ordinary encounter boundary without remote verification and commands the next battle", async () => {
+    game.override.moveset([MoveId.TACKLE]).enemyMoveset([MoveId.SPLASH]);
+    await game.classicMode.startBattle(SpeciesId.SQUIRTLE);
+
+    const controller = (
+      game.scene as unknown as {
+        autoplayController: { enabled: boolean; nextActionAt: number; update: (time: number) => void };
+      }
+    ).autoplayController;
+    const verifyRemote = vi.spyOn(pokerogueApi.savedata.system, "verify");
+    game.field.getEnemyPokemon().hp = 1;
+    const runAutoplayTick = (time: number) => {
+      controller.enabled = true;
+      controller.nextActionAt = 0;
+      controller.update(time);
+      controller.enabled = false;
+    };
+
+    runAutoplayTick(1_000);
+    await game.phaseInterceptor.to("SelectModifierPhase");
+    game.doSelectModifier();
+    await game.phaseInterceptor.to("CommandPhase");
+
+    expect(game.scene.currentBattle.waveIndex).toBe(2);
+    expect(verifyRemote).not.toHaveBeenCalled();
+    runAutoplayTick(2_000);
+    await game.phaseInterceptor.to("EnemyCommandPhase");
+  }, 60_000);
 });

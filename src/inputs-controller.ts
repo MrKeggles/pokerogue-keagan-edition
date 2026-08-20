@@ -180,7 +180,6 @@ export class InputsController {
    */
   loseFocus(): void {
     this.deactivatePressedKey();
-    this.touchControls.deactivatePressedKey();
   }
 
   /**
@@ -350,6 +349,12 @@ export class InputsController {
    */
   keyboardKeyDown(event: KeyboardEvent): void {
     this.lastSource = "keyboard";
+    // `deactivatePressedKey` intentionally clears our repeat timers when autoplay is enabled.
+    // The browser can still deliver native repeat keydowns for a key that was already held;
+    // treating one as a fresh press would immediately disable autoplay again.
+    if (event.repeat) {
+      return;
+    }
     this.ensureKeyboardIsInit();
     const buttonDown = getButtonWithKeycode(this.getActiveConfig(Device.KEYBOARD)!, event.keyCode);
     if (buttonDown != null) {
@@ -359,12 +364,14 @@ export class InputsController {
       this.events.emit("input_down", {
         controller_type: "keyboard",
         button: buttonDown,
+        repeat: false,
       });
       clearInterval(this.inputInterval[buttonDown]);
       this.inputInterval[buttonDown] = setInterval(() => {
         this.events.emit("input_down", {
           controller_type: "keyboard",
           button: buttonDown,
+          repeat: true,
         });
       }, repeatInputDelayMillis);
       this.buttonLock.push(buttonDown);
@@ -386,7 +393,9 @@ export class InputsController {
         button: buttonUp,
       });
       const index = this.buttonLock.indexOf(buttonUp);
-      this.buttonLock.splice(index, 1);
+      if (index >= 0) {
+        this.buttonLock.splice(index, 1);
+      }
       clearInterval(this.inputInterval[buttonUp]);
     }
   }
@@ -427,6 +436,7 @@ export class InputsController {
       this.events.emit("input_down", {
         controller_type: "gamepad",
         button: buttonDown,
+        repeat: false,
       });
       clearInterval(this.inputInterval[buttonDown]);
       this.inputInterval[buttonDown] = setInterval(() => {
@@ -437,6 +447,7 @@ export class InputsController {
         this.events.emit("input_down", {
           controller_type: "gamepad",
           button: buttonDown,
+          repeat: true,
         });
       }, repeatInputDelayMillis);
       this.buttonLock.push(buttonDown);
@@ -468,7 +479,9 @@ export class InputsController {
         button: buttonUp,
       });
       const index = this.buttonLock.indexOf(buttonUp);
-      this.buttonLock.splice(index, 1);
+      if (index >= 0) {
+        this.buttonLock.splice(index, 1);
+      }
       clearInterval(this.inputInterval[buttonUp]);
     }
   }
@@ -522,6 +535,7 @@ export class InputsController {
       clearInterval(value);
     }
     this.buttonLock = [];
+    this.touchControls?.deactivatePressedKey();
   }
 
   /**

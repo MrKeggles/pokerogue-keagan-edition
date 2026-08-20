@@ -3190,8 +3190,8 @@ export class StarterSelectUiHandler extends MessageUiHandler {
     return true;
   }
 
-  /** Check that each pokemon in the party is valid for the current challenge. */
-  private isPartyValid(): boolean {
+  /** Check that the current party can start the selected game mode or challenge. */
+  public isPartyValid(): boolean {
     let canStart = false;
     for (let s = 0; s < this.partyStarterIds.length; s++) {
       const starterId = this.partyStarterIds[s];

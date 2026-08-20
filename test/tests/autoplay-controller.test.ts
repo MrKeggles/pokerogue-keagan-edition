@@ -14,6 +14,7 @@ import {
   scoreLearnedMoveset,
 } from "#app/autoplay-battle-evaluator";
 import {
+  AUTOPLAY_STALL_TIMEOUT_MS,
   AutoplayController,
   coerceNotificationSettings,
   coerceSaveSlotRotation,
@@ -42,13 +43,18 @@ import {
   scoreDamageForTargetSide,
   scoreLegalMoveTargets,
   shouldHandleAutoplayHotkey,
+  shouldPauseAutoplayForManualInput,
   shouldScoreMoveAsFailure,
   summarizeMoveTargetScores,
 } from "#app/autoplay-controller";
 import { globalScene, initGlobalScene } from "#app/global-scene";
 import { modifierTypes } from "#data/data-lists";
 import { allMysteryEncounters, initMysteryEncounters } from "#data/mystery-encounters/mystery-encounter-biomes";
+import { BattlerIndex } from "#enums/battler-index";
+import { Command } from "#enums/command";
 import { MoveCategory } from "#enums/move-category";
+import { MoveId } from "#enums/move-id";
+import { MoveUseMode } from "#enums/move-use-mode";
 import { MysteryEncounterOptionMode } from "#enums/mystery-encounter-option-mode";
 import { MysteryEncounterType } from "#enums/mystery-encounter-type";
 import { PartyUiMode } from "#enums/party-ui-mode";
@@ -56,6 +62,7 @@ import { PokemonType } from "#enums/pokemon-type";
 import { UiMode } from "#enums/ui-mode";
 import type { Pokemon } from "#field/pokemon";
 import { MysteryEncounterAutoplayPolicy } from "#mystery-encounters/mystery-encounter-option";
+import type { CommandPhase } from "#phases/command-phase";
 import type { LearnMovePhase } from "#phases/learn-move-phase";
 import {
   findFirstAutoplaySafeMysteryOptionIndex,
@@ -311,6 +318,197 @@ describe("Autoplay controller policies", () => {
       expect(resolveSwitchAttempt(true)).toEqual({ returnImmediately: true, suppressNextSwitch: false });
       expect(planSwitchAttempt(false, null)).toEqual({ kind: "FIGHT" });
     });
+
+    it("submits explicit forced Struggle without re-entering the move forecast", () => {
+      const previousScene = globalScene;
+      const opponent = {
+        getBattlerIndex: () => BattlerIndex.ENEMY,
+        isActive: () => true,
+      };
+      initGlobalScene({
+        getEnemyField: () => [opponent],
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const handleCommand = vi.fn().mockReturnValue(true);
+      const phase = { handleCommand } as unknown as CommandPhase;
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        fallbackSubmissionFailures: number;
+        forceStruggleNextCommand: boolean;
+        forcedStruggleTargetIndex: BattlerIndex | null;
+        pauseForSafety: (reason: string) => void;
+        pendingTargetIndex: number | null;
+        submitForcedStruggle: (phase: CommandPhase, target?: BattlerIndex | null) => void;
+      };
+      controller.fallbackSubmissionFailures = 0;
+      controller.forceStruggleNextCommand = false;
+      controller.forcedStruggleTargetIndex = null;
+      controller.pendingTargetIndex = null;
+      controller.pauseForSafety = pauseForSafety;
+
+      try {
+        controller.submitForcedStruggle(phase);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(handleCommand).toHaveBeenCalledWith(Command.FIGHT, -1, MoveUseMode.IGNORE_PP, {
+        move: MoveId.STRUGGLE,
+        targets: [BattlerIndex.ENEMY],
+        useMode: MoveUseMode.IGNORE_PP,
+      });
+      expect(pauseForSafety).not.toHaveBeenCalled();
+    });
+
+    it("pauses only after three consecutive forced-Struggle submission failures", () => {
+      const previousScene = globalScene;
+      initGlobalScene({ getEnemyField: () => [] } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const phase = { handleCommand: vi.fn().mockReturnValue(false) } as unknown as CommandPhase;
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        fallbackSubmissionFailures: number;
+        forceStruggleNextCommand: boolean;
+        forcedStruggleTargetIndex: BattlerIndex | null;
+        pauseForSafety: (reason: string) => void;
+        pendingTargetIndex: number | null;
+        submitForcedStruggle: (phase: CommandPhase, target?: BattlerIndex | null) => void;
+      };
+      controller.fallbackSubmissionFailures = 0;
+      controller.forceStruggleNextCommand = false;
+      controller.forcedStruggleTargetIndex = null;
+      controller.pauseForSafety = pauseForSafety;
+      controller.pendingTargetIndex = null;
+
+      try {
+        controller.submitForcedStruggle(phase);
+        controller.submitForcedStruggle(phase);
+        expect(pauseForSafety).not.toHaveBeenCalled();
+        controller.submitForcedStruggle(phase);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).toHaveBeenCalledWith("BATTLE FALLBACK FAILED: CommandPhase/COMMAND");
+      expect(phase.handleCommand).not.toHaveBeenCalled();
+    });
+
+    it("arms a forced-Struggle retry when a normal fight command is rejected", () => {
+      const previousScene = globalScene;
+      const battle = { waveIndex: 12 };
+      const opponent = {
+        getBattlerIndex: () => BattlerIndex.ENEMY,
+        isActive: () => true,
+      } as unknown as Pokemon;
+      initGlobalScene({
+        currentBattle: battle,
+        getEnemyField: () => [opponent],
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const handleCommand = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+      const phase = {
+        getPokemon: () => ({ getMoveset: () => [{}] }),
+        handleCommand,
+      } as unknown as CommandPhase;
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        chooseMove: () => { index: number; score: number; targetIndex: BattlerIndex };
+        chooseSwitch: () => null;
+        fallbackSubmissionFailures: number;
+        forceStruggleNextCommand: boolean;
+        forcedStruggleTargetIndex: BattlerIndex | null;
+        getActiveOpponents: () => Pokemon[];
+        handleBattleCommand: (phase: CommandPhase) => void;
+        pendingTargetIndex: number | null;
+        plannerBattle: unknown;
+        plannerBattleWave: number;
+        plannerCircuitOpen: boolean;
+        plannerErrorCount: number;
+        statusNote: string;
+        suppressNextSwitchAttempt: boolean;
+        updateBadge: () => void;
+      };
+      controller.chooseMove = () => ({ index: 0, score: 1, targetIndex: BattlerIndex.ENEMY });
+      controller.chooseSwitch = () => null;
+      controller.fallbackSubmissionFailures = 0;
+      controller.forceStruggleNextCommand = false;
+      controller.forcedStruggleTargetIndex = null;
+      controller.getActiveOpponents = () => [opponent];
+      controller.pendingTargetIndex = null;
+      controller.plannerBattle = null;
+      controller.plannerBattleWave = -1;
+      controller.plannerCircuitOpen = false;
+      controller.plannerErrorCount = 0;
+      controller.statusNote = "";
+      controller.suppressNextSwitchAttempt = false;
+      controller.updateBadge = vi.fn();
+
+      try {
+        controller.handleBattleCommand(phase);
+        expect(controller.forceStruggleNextCommand).toBe(true);
+        controller.handleBattleCommand(phase);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(handleCommand).toHaveBeenNthCalledWith(1, Command.FIGHT, 0);
+      expect(handleCommand).toHaveBeenNthCalledWith(2, Command.FIGHT, -1, MoveUseMode.IGNORE_PP, {
+        move: MoveId.STRUGGLE,
+        targets: [BattlerIndex.ENEMY],
+        useMode: MoveUseMode.IGNORE_PP,
+      });
+      expect(controller.forceStruggleNextCommand).toBe(false);
+    });
+
+    it("opens the battle-planner circuit after three forecast errors", () => {
+      const previousScene = globalScene;
+      const battle = { waveIndex: 7 };
+      initGlobalScene({ currentBattle: battle } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const submitForcedStruggle = vi.fn();
+      const chooseMove = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        chooseMove: () => unknown;
+        fallbackSubmissionFailures: number;
+        forceStruggleNextCommand: boolean;
+        forcedStruggleTargetIndex: BattlerIndex | null;
+        handleBattleCommand: (phase: CommandPhase) => void;
+        handlePlannerError: (phase: CommandPhase, opponents: Pokemon[], error: unknown) => void;
+        plannerBattle: unknown;
+        plannerBattleWave: number;
+        plannerCircuitOpen: boolean;
+        plannerErrorCount: number;
+        statusNote: string;
+        submitForcedStruggle: (phase: CommandPhase, target?: BattlerIndex | null) => void;
+        updateBadge: () => void;
+      };
+      const phase = {} as CommandPhase;
+      controller.chooseMove = chooseMove;
+      controller.fallbackSubmissionFailures = 0;
+      controller.forceStruggleNextCommand = false;
+      controller.forcedStruggleTargetIndex = null;
+      controller.plannerBattle = battle;
+      controller.plannerBattleWave = battle.waveIndex;
+      controller.plannerCircuitOpen = false;
+      controller.plannerErrorCount = 0;
+      controller.statusNote = "";
+      controller.submitForcedStruggle = submitForcedStruggle;
+      controller.updateBadge = vi.fn();
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        controller.handlePlannerError(phase, [], new Error("forecast"));
+        controller.handlePlannerError(phase, [], new Error("forecast"));
+        controller.handlePlannerError(phase, [], new Error("forecast"));
+        expect(controller.plannerCircuitOpen).toBe(true);
+
+        submitForcedStruggle.mockClear();
+        controller.handleBattleCommand(phase);
+      } finally {
+        consoleError.mockRestore();
+        consoleWarn.mockRestore();
+        initGlobalScene(previousScene);
+      }
+
+      expect(chooseMove).not.toHaveBeenCalled();
+      expect(submitForcedStruggle).toHaveBeenCalledOnce();
+    });
   });
 
   describe("reward and option safety", () => {
@@ -350,6 +548,36 @@ describe("Autoplay controller policies", () => {
       expect(isSafeOptionSelectContext(UiMode.OPTION_SELECT, "TitlePhase", true)).toBe(true);
       expect(isSafeOptionSelectContext(UiMode.MENU_OPTION_SELECT, "TitlePhase", false)).toBe(false);
       expect(isSafeOptionSelectContext(UiMode.MENU_OPTION_SELECT, "TitlePhase", true)).toBe(true);
+    });
+
+    it("retains a one-shot option authorization until the UI accepts it", () => {
+      const previousScene = globalScene;
+      const processInput = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+      initGlobalScene({ ui: { processInput } } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        allowNextMenuOptionSelectAction: boolean;
+        allowNextOptionSelectAction: boolean;
+        handleOptionSelectMode: (mode: UiMode.OPTION_SELECT, phaseName: string) => void;
+        pauseForSafety: (reason: string) => void;
+        pendingStarterIntent: null;
+      };
+      controller.allowNextMenuOptionSelectAction = false;
+      controller.allowNextOptionSelectAction = true;
+      controller.pauseForSafety = pauseForSafety;
+      controller.pendingStarterIntent = null;
+
+      try {
+        controller.handleOptionSelectMode(UiMode.OPTION_SELECT, "TitlePhase");
+        expect(controller.allowNextOptionSelectAction).toBe(true);
+        controller.handleOptionSelectMode(UiMode.OPTION_SELECT, "TitlePhase");
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(processInput).toHaveBeenCalledTimes(2);
+      expect(controller.allowNextOptionSelectAction).toBe(false);
+      expect(pauseForSafety).not.toHaveBeenCalled();
     });
   });
 
@@ -406,6 +634,157 @@ describe("Autoplay controller policies", () => {
       expect(planAutoplayConfirmation("GameOverPhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("ScanIvsPhase", false)).toBe("CANCEL");
       expect(planAutoplayConfirmation("AccountPhase", false)).toBe("PAUSE");
+    });
+
+    it("authorizes a starter option only after starter input is accepted", () => {
+      const previousScene = globalScene;
+      const prepareDefaultStarterSelection = vi.fn();
+      let mode = UiMode.STARTER_SELECT;
+      const processInput = vi
+        .fn()
+        .mockReturnValueOnce(false)
+        .mockImplementationOnce(() => {
+          mode = UiMode.OPTION_SELECT;
+          return true;
+        });
+      initGlobalScene({
+        ui: {
+          getMode: () => mode,
+          getHandler: () => ({ partyStarterIds: [], prepareDefaultStarterSelection }),
+          processInput,
+        },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        buildingDefaultStarterTeam: boolean;
+        handleStarterSelectMode: () => void;
+        pendingStarterIntent: Parameters<typeof planStarterFlowTransition>[0];
+        pendingStarterIntentStartedAt: number;
+        waitForPendingStarterTransition: () => void;
+      };
+      controller.buildingDefaultStarterTeam = false;
+      controller.pendingStarterIntent = null;
+      controller.pendingStarterIntentStartedAt = 0;
+      controller.waitForPendingStarterTransition = vi.fn();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+      try {
+        controller.handleStarterSelectMode();
+        expect(controller.pendingStarterIntent).toBeNull();
+        controller.handleStarterSelectMode();
+      } finally {
+        now.mockRestore();
+        initGlobalScene(previousScene);
+      }
+
+      expect(prepareDefaultStarterSelection).toHaveBeenCalledTimes(2);
+      expect(controller.pendingStarterIntent).toBe("ADD_DEFAULT_STARTER");
+      expect(controller.pendingStarterIntentStartedAt).toBe(1_000);
+    });
+
+    it("does not authorize a starter option when the handler reports an input error as handled", () => {
+      const previousScene = globalScene;
+      const processInput = vi.fn().mockReturnValue(true);
+      initGlobalScene({
+        ui: {
+          getMode: () => UiMode.STARTER_SELECT,
+          getHandler: () => ({ partyStarterIds: [], prepareDefaultStarterSelection: vi.fn() }),
+          processInput,
+        },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        buildingDefaultStarterTeam: boolean;
+        handleStarterSelectMode: () => void;
+        pauseForSafety: (reason: string) => void;
+        pendingStarterIntent: Parameters<typeof planStarterFlowTransition>[0];
+        pendingStarterIntentStartedAt: number;
+      };
+      controller.buildingDefaultStarterTeam = false;
+      controller.pauseForSafety = pauseForSafety;
+      controller.pendingStarterIntent = null;
+      controller.pendingStarterIntentStartedAt = 0;
+
+      try {
+        controller.handleStarterSelectMode();
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(controller.pendingStarterIntent).toBeNull();
+      expect(pauseForSafety).toHaveBeenCalledWith("DEFAULT STARTER UNAVAILABLE");
+    });
+
+    it("rejects an invalid starter team before treating SUBMIT as accepted", () => {
+      const previousScene = globalScene;
+      const processInput = vi.fn();
+      initGlobalScene({
+        ui: {
+          getHandler: () => ({
+            isPartyValid: () => false,
+            partyStarterIds: [25],
+          }),
+          processInput,
+        },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        buildingDefaultStarterTeam: boolean;
+        handleStarterSelectMode: () => void;
+        pauseForSafety: (reason: string) => void;
+        pendingStarterIntent: Parameters<typeof planStarterFlowTransition>[0];
+        pendingStarterIntentStartedAt: number;
+      };
+      controller.buildingDefaultStarterTeam = false;
+      controller.pauseForSafety = pauseForSafety;
+      controller.pendingStarterIntent = null;
+      controller.pendingStarterIntentStartedAt = 0;
+
+      try {
+        controller.handleStarterSelectMode();
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(processInput).not.toHaveBeenCalled();
+      expect(pauseForSafety).toHaveBeenCalledWith("STARTER TEAM INVALID");
+    });
+
+    it("retries starter confirmation without consuming its authorization early", () => {
+      const previousScene = globalScene;
+      const processInput = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+      initGlobalScene({
+        phaseManager: { getCurrentPhase: () => ({ phaseName: "SelectStarterPhase" }) },
+        ui: { processInput },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const waitForPendingStarterTransition = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        buildingDefaultStarterTeam: boolean;
+        handleConfirmMode: () => void;
+        pauseForSafety: (reason: string) => void;
+        pendingStarterIntent: Parameters<typeof planStarterFlowTransition>[0];
+        pendingStarterIntentStartedAt: number;
+        waitForPendingStarterTransition: () => void;
+      };
+      controller.buildingDefaultStarterTeam = true;
+      controller.pauseForSafety = vi.fn();
+      controller.pendingStarterIntent = "CONFIRM_STARTER_TEAM";
+      controller.pendingStarterIntentStartedAt = 500;
+      controller.waitForPendingStarterTransition = waitForPendingStarterTransition;
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+      try {
+        controller.handleConfirmMode();
+        expect(controller.pendingStarterIntent).toBe("CONFIRM_STARTER_TEAM");
+        controller.handleConfirmMode();
+      } finally {
+        now.mockRestore();
+        initGlobalScene(previousScene);
+      }
+
+      expect(waitForPendingStarterTransition).toHaveBeenCalledOnce();
+      expect(controller.pendingStarterIntent).toBe("AWAIT_SAVE_SLOT");
+      expect(controller.buildingDefaultStarterTeam).toBe(false);
+      expect(controller.pendingStarterIntentStartedAt).toBe(1_000);
     });
 
     it("retries a transient move-learning UI failure and submits the choice only once", () => {
@@ -637,6 +1016,244 @@ describe("Autoplay controller policies", () => {
       expect(hasReachedCompletedRunLimit(2, 2)).toBe(true);
       expect(hasReachedCompletedRunLimit(100, 0)).toBe(false);
     });
+
+    it("lets F8 resume past the active persisted stop rule until its trigger clears", () => {
+      const previousScene = globalScene;
+      const battle = { waveIndex: 10 };
+      const deactivatePressedKey = vi.fn();
+      initGlobalScene({
+        currentBattle: battle,
+        inputController: { deactivatePressedKey },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        bypassedStopRules: Set<"MAX_RUNS" | "TARGET_SPECIES" | "WAVE_RANGE">;
+        completedRunsThisSession: number;
+        enabled: boolean;
+        ensureNotificationPermission: () => void;
+        fallbackSubmissionFailures: number;
+        forceStruggleNextCommand: boolean;
+        forcedStruggleTargetIndex: BattlerIndex | null;
+        getActiveOpponents: () => Pokemon[];
+        getSmartStopMatch: () => { kind: string; reason: string } | null;
+        manualOverride: boolean;
+        nextActionAt: number;
+        pausedStopRuleKind: "MAX_RUNS" | "TARGET_SPECIES" | "WAVE_RANGE" | null;
+        plannerBattle: unknown;
+        plannerBattleWave: number;
+        plannerCircuitOpen: boolean;
+        plannerErrorCount: number;
+        progressObservedAt: number | null;
+        progressPhase: unknown;
+        progressSignature: string;
+        setEnabled: (enabled: boolean, manualOverride?: boolean, statusNote?: string) => void;
+        statusNote: string;
+        stopRules: {
+          enabled: boolean;
+          stopAfterRuns: number;
+          targetSpeciesIds: number[];
+          waveRangeEnd: number;
+          waveRangeStart: number;
+        };
+        storeEnabled: () => void;
+        storeStats: () => void;
+        unexpectedActErrorCount: number;
+        unexpectedActErrorSignature: string;
+        updateBadge: () => void;
+      };
+      controller.bypassedStopRules = new Set();
+      controller.completedRunsThisSession = 0;
+      controller.enabled = false;
+      controller.ensureNotificationPermission = vi.fn();
+      controller.fallbackSubmissionFailures = 0;
+      controller.forceStruggleNextCommand = false;
+      controller.forcedStruggleTargetIndex = null;
+      controller.getActiveOpponents = () => [];
+      controller.manualOverride = false;
+      controller.nextActionAt = 0;
+      controller.pausedStopRuleKind = "WAVE_RANGE";
+      controller.plannerBattle = null;
+      controller.plannerBattleWave = -1;
+      controller.plannerCircuitOpen = false;
+      controller.plannerErrorCount = 0;
+      controller.progressObservedAt = null;
+      controller.progressPhase = null;
+      controller.progressSignature = "";
+      controller.statusNote = "STOP RULE: WAVE 10";
+      controller.stopRules = {
+        enabled: true,
+        stopAfterRuns: 0,
+        targetSpeciesIds: [],
+        waveRangeEnd: 12,
+        waveRangeStart: 10,
+      };
+      controller.storeEnabled = vi.fn();
+      controller.storeStats = vi.fn();
+      controller.unexpectedActErrorCount = 0;
+      controller.unexpectedActErrorSignature = "";
+      controller.updateBadge = vi.fn();
+      const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+      try {
+        controller.setEnabled(true);
+        expect(controller.getSmartStopMatch()).toBeNull();
+        expect(controller.bypassedStopRules.has("WAVE_RANGE")).toBe(true);
+
+        battle.waveIndex = 13;
+        expect(controller.getSmartStopMatch()).toBeNull();
+      } finally {
+        consoleInfo.mockRestore();
+        initGlobalScene(previousScene);
+      }
+
+      expect(controller.bypassedStopRules.has("WAVE_RANGE")).toBe(false);
+      expect(deactivatePressedKey).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("recovery diagnostics", () => {
+    it("contains lifecycle errors before they can escape the game update loop", () => {
+      const previousScene = globalScene;
+      initGlobalScene({ ui: {} } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const runtimeError = new Error("lifecycle failed");
+      const handleUnexpectedActError = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        accumulateAfkTime: (time: number) => void;
+        enabled: boolean;
+        handleUnexpectedActError: (error: unknown) => void;
+        lastUpdateTime: number;
+        observeRunLifecycle: () => void;
+        update: (time: number) => void;
+      };
+      controller.accumulateAfkTime = vi.fn();
+      controller.enabled = true;
+      controller.handleUnexpectedActError = handleUnexpectedActError;
+      controller.lastUpdateTime = 0;
+      controller.observeRunLifecycle = vi.fn(() => {
+        throw runtimeError;
+      });
+
+      try {
+        expect(() => controller.update(5_000)).not.toThrow();
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(handleUnexpectedActError).toHaveBeenCalledWith(runtimeError);
+      expect(controller.lastUpdateTime).toBe(5_000);
+    });
+
+    it("pauses with phase and mode after a true unchanged-state stall", () => {
+      const previousScene = globalScene;
+      let phase: { phaseName: string } = { phaseName: "CommandPhase" };
+      initGlobalScene({
+        currentBattle: { waveIndex: 4 },
+        phaseManager: { getCurrentPhase: () => phase },
+        ui: { getMode: () => UiMode.COMMAND },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        pauseForSafety: (reason: string) => void;
+        pauseIfStalled: (time: number) => boolean;
+        progressObservedAt: number | null;
+        progressPhase: unknown;
+        progressSignature: string;
+        runtimeStatus: string;
+        updateBadge: () => void;
+      };
+      controller.pauseForSafety = pauseForSafety;
+      controller.progressObservedAt = null;
+      controller.progressPhase = null;
+      controller.progressSignature = "";
+      controller.runtimeStatus = "";
+      controller.updateBadge = vi.fn();
+
+      try {
+        expect(controller.pauseIfStalled(1_000)).toBe(false);
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS - 1)).toBe(false);
+
+        phase = { phaseName: "CommandPhase" };
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS)).toBe(false);
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS * 2)).toBe(true);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).toHaveBeenCalledWith("STALLED: CommandPhase/COMMAND");
+      expect(controller.runtimeStatus).toBe("CommandPhase/COMMAND/W4");
+    });
+
+    it.each([
+      UiMode.LOADING,
+      UiMode.UNAVAILABLE,
+    ])("keeps autonomous wait mode %s enabled beyond the ordinary stall timeout", mode => {
+      const previousScene = globalScene;
+      initGlobalScene({
+        currentBattle: { waveIndex: 4 },
+        phaseManager: { getCurrentPhase: () => ({ phaseName: "UnavailablePhase" }) },
+        ui: { getMode: () => mode },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        pauseForSafety: (reason: string) => void;
+        pauseIfStalled: (time: number) => boolean;
+        progressObservedAt: number | null;
+        progressPhase: unknown;
+        progressSignature: string;
+        runtimeStatus: string;
+        updateBadge: () => void;
+      };
+      controller.pauseForSafety = pauseForSafety;
+      controller.progressObservedAt = null;
+      controller.progressPhase = null;
+      controller.progressSignature = "";
+      controller.runtimeStatus = "";
+      controller.updateBadge = vi.fn();
+
+      try {
+        expect(controller.pauseIfStalled(1_000)).toBe(false);
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS * 10)).toBe(false);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).not.toHaveBeenCalled();
+      expect(controller.runtimeStatus).toContain("WAITING:");
+    });
+
+    it("bounds repeated unexpected UI errors and reports their exact context", () => {
+      const previousScene = globalScene;
+      initGlobalScene({
+        phaseManager: { getCurrentPhase: () => ({ phaseName: "SelectModifierPhase" }) },
+        ui: { getMode: () => UiMode.MODIFIER_SELECT },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        handleUnexpectedActError: (error: unknown) => void;
+        pauseForSafety: (reason: string) => void;
+        statusNote: string;
+        unexpectedActErrorCount: number;
+        unexpectedActErrorSignature: string;
+        updateBadge: () => void;
+      };
+      controller.pauseForSafety = pauseForSafety;
+      controller.statusNote = "";
+      controller.unexpectedActErrorCount = 0;
+      controller.unexpectedActErrorSignature = "";
+      controller.updateBadge = vi.fn();
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        controller.handleUnexpectedActError(new Error("busy"));
+        controller.handleUnexpectedActError(new Error("busy"));
+        expect(pauseForSafety).not.toHaveBeenCalled();
+        controller.handleUnexpectedActError(new Error("busy"));
+      } finally {
+        consoleError.mockRestore();
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).toHaveBeenCalledWith("AUTOPLAY ERROR: SelectModifierPhase/MODIFIER_SELECT");
+    });
   });
 
   describe("stored configuration", () => {
@@ -703,6 +1320,13 @@ describe("Autoplay controller policies", () => {
       expect(shouldHandleAutoplayHotkey({ code: "F9", repeat: false })).toBe(true);
       expect(shouldHandleAutoplayHotkey({ code: "F9", repeat: true })).toBe(false);
       expect(shouldHandleAutoplayHotkey({ code: "KeyA", repeat: false })).toBe(false);
+    });
+
+    it("ignores held controller repeats but still honors fresh manual input", () => {
+      expect(shouldPauseAutoplayForManualInput(true, { repeat: true })).toBe(false);
+      expect(shouldPauseAutoplayForManualInput(true, { repeat: false })).toBe(true);
+      expect(shouldPauseAutoplayForManualInput(true)).toBe(true);
+      expect(shouldPauseAutoplayForManualInput(false, { repeat: false })).toBe(false);
     });
   });
 });

@@ -93,6 +93,26 @@ describe("System - Game Data", () => {
       await expect(game.scene.gameData.verify()).resolves.toBe(true);
     });
 
+    it("persists a local snapshot without starting remote verification when requested", async () => {
+      vi.spyOn(game.scene.gameData, "getSessionSaveData").mockReturnValue({} as SessionSaveData);
+      const verifyRemote = vi.spyOn(pokerogueApi.savedata.system, "verify");
+
+      await expect(game.scene.gameData.saveAll(true, false, false, false, false)).resolves.toBe(true);
+
+      expect(localStorage.getItem(`data_${account.loggedInUser?.username}`)).not.toBeNull();
+      expect(localStorage.getItem(account.getSessionDataLocalStorageKey(0))).not.toBeNull();
+      expect(verifyRemote).not.toHaveBeenCalled();
+    });
+
+    it("retains remote verification as the default for local-only saves", async () => {
+      vi.spyOn(game.scene.gameData, "getSessionSaveData").mockReturnValue({} as SessionSaveData);
+      const verifyRemote = vi.spyOn(pokerogueApi.savedata.system, "verify").mockResolvedValue(null);
+
+      await expect(game.scene.gameData.saveAll(true, false)).resolves.toBe(true);
+
+      expect(verifyRemote).toHaveBeenCalledTimes(1);
+    });
+
     it("protects a local snapshot until a later remote sync succeeds", async () => {
       expect(appConstants.bypassLogin).toBe(false);
       vi.spyOn(game.scene.gameData, "getSessionSaveData").mockReturnValue({} as SessionSaveData);
