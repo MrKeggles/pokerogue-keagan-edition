@@ -45,7 +45,7 @@ export class SelectTargetPhase extends PokemonPhase {
         // TODO: Denest and make less jank
 
         // TODO: when would this occur?
-        if (targets[0]) {
+        if (targets.length > 0) {
           const restrictingTag = user.getTargetRestrictingTag(moveId, fieldSide[targets[0]]);
           if (restrictingTag) {
             globalScene.phaseManager.queueMessage(restrictingTag.selectionDeniedText(user, moveId));

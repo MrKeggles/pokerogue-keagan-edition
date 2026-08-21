@@ -2812,12 +2812,12 @@ export abstract class Pokemon extends Phaser.GameObjects.Container {
      * This score cannot be higher than 4.
      */
     // TODO: This should use a `reduce` over the types
-    let defScore = 1 / Math.max(this.getAttackTypeEffectiveness(enemyTypes[0], { source: opponent }), 0.25);
+    let defScore =
+      1 / Math.max(this.getAttackTypeEffectiveness(enemyTypes[0], { source: opponent, simulated: true }), 0.25);
     if (enemyTypes.length > 1) {
-      // TODO: Shouldn't this pass `simulated=true` here?
       const secondTypeEff = this.getAttackTypeEffectiveness(enemyTypes[1], {
         source: opponent,
-        simulated: false,
+        simulated: true,
         useIllusion: true,
       });
       defScore /= Math.max(secondTypeEff, 0.25);

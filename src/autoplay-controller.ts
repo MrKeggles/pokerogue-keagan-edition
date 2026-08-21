@@ -54,6 +54,8 @@ const STARTER_TRANSITION_TIMEOUT_MS = 10_000;
 const MYSTERY_OPTION_TIMEOUT_MS = 10_000;
 const LEARN_MOVE_SELECTION_TIMEOUT_MS = 10_000;
 export const AUTOPLAY_STALL_TIMEOUT_MS = 60_000;
+const AUTOPLAY_WATCHDOG_MAX_SAMPLE_MS = 1_000;
+const AUTOPLAY_COMMAND_CYCLE_PHASES = new Set(["CommandPhase", "EnemyCommandPhase", "SelectTargetPhase"]);
 const AUTOPLAY_ERROR_RETRY_LIMIT = 3;
 const AUTOPLAY_PLANNER_ERROR_LIMIT = 3;
 const AUTOPLAY_FALLBACK_FAILURE_LIMIT = 3;
@@ -754,8 +756,9 @@ export class AutoplayController {
   private pendingLearnMoveSelectionStartedAt = 0;
   private learnMoveSelectionSubmitted = false;
   private progressSignature = "";
-  private progressPhase: unknown = null;
+  private progressBattle: unknown = null;
   private progressObservedAt: number | null = null;
+  private progressActiveMs = 0;
   private pausedStopRuleKind: AutoplayStopRuleKind | null = null;
   private readonly bypassedStopRules = new Set<AutoplayStopRuleKind>();
   private plannerBattle: unknown = null;
@@ -882,17 +885,32 @@ export class AutoplayController {
   }
 
   /**
-   * Treats a phase, UI mode, or wave change as forward progress. Remaining in the exact same
-   * interactive state for a full minute is almost certainly a rejected input or unsupported UI,
-   * but still leaves enough room for ordinary animations and remote loading.
+   * Treats a semantic battle-state change as forward progress. The timeout accumulates only time
+   * sampled by regular renderer updates; a single large jump after the app was suspended or
+   * background-throttled must not be mistaken for a minute spent stuck in a live phase.
    */
   private pauseIfStalled(time: number): boolean {
     const phase = globalScene.phaseManager.getCurrentPhase() as unknown as { phaseName?: string } | undefined;
     const mode = globalScene.ui.getMode();
     const phaseName = phase?.phaseName ?? "NO_PHASE";
     const modeName = UiMode[mode] ?? `MODE_${mode}`;
-    const wave = globalScene.currentBattle?.waveIndex ?? 0;
-    const signature = `${phaseName}/${modeName}/W${wave}`;
+    const battle = globalScene.currentBattle;
+    const wave = battle?.waveIndex ?? 0;
+    const turn = battle?.turn ?? 0;
+    const signature = `${phaseName}/${modeName}/W${wave}/T${turn}`;
+    const turnProgressSignature = `BATTLE_COMMAND/W${wave}/T${turn}`;
+    const continuesCommandCycle = phaseName === "MessagePhase" && this.progressSignature === turnProgressSignature;
+    const tracksCommandCycle =
+      battle != null && (AUTOPLAY_COMMAND_CYCLE_PHASES.has(phaseName) || continuesCommandCycle);
+    const progressSignature = tracksCommandCycle ? turnProgressSignature : signature;
+    const sampledDelta =
+      this.progressObservedAt == null
+      || !Number.isFinite(this.progressObservedAt)
+      || !Number.isFinite(time)
+      || time < this.progressObservedAt
+        ? 0
+        : Math.min(time - this.progressObservedAt, AUTOPLAY_WATCHDOG_MAX_SAMPLE_MS);
+    this.progressObservedAt = time;
 
     // Loading and the unavailable modal advance through their own async callbacks (including
     // reconnect backoff). Keep the watchdog fresh while they work so AFK resumes automatically
@@ -901,34 +919,45 @@ export class AutoplayController {
       const waitingStatus = `WAITING: ${signature}`;
       const statusChanged = this.runtimeStatus !== waitingStatus;
       this.runtimeStatus = waitingStatus;
-      this.progressSignature = signature;
-      this.progressPhase = phase;
-      this.progressObservedAt = time;
+      this.progressSignature = progressSignature;
+      this.progressBattle = battle;
+      this.progressActiveMs = 0;
       if (statusChanged) {
         this.updateBadge();
       }
       return false;
     }
 
+    const statusChanged = this.runtimeStatus !== signature;
     this.runtimeStatus = signature;
-    if (
-      signature !== this.progressSignature
-      || phase !== this.progressPhase
-      || this.progressObservedAt == null
-      || time < this.progressObservedAt
-    ) {
-      this.progressSignature = signature;
-      this.progressPhase = phase;
-      this.progressObservedAt = time;
+    if (progressSignature !== this.progressSignature || battle !== this.progressBattle) {
+      this.progressSignature = progressSignature;
+      this.progressBattle = battle;
+      this.progressActiveMs = 0;
       this.updateBadge();
       return false;
     }
 
-    if (time - this.progressObservedAt < AUTOPLAY_STALL_TIMEOUT_MS) {
+    if (statusChanged) {
+      this.updateBadge();
+    }
+
+    this.progressActiveMs += sampledDelta;
+    if (this.progressActiveMs < AUTOPLAY_STALL_TIMEOUT_MS) {
       return false;
     }
 
+    const stallEvent = tracksCommandCycle ? "Battle stalled" : "Autoplay stalled";
+    const stallDetails = tracksCommandCycle
+      ? `No turn progress was detected on wave ${wave}, turn ${turn} (last state: ${phaseName}/${modeName}); AFK mode was stopped safely.`
+      : `No UI progress was detected in ${signature}; AFK mode was stopped safely.`;
+    console.warn(`[Autoplay] ${stallDetails}`);
     this.pauseForSafety(`STALLED: ${phaseName}/${modeName}`);
+    try {
+      this.emitNotification(stallEvent, stallDetails);
+    } catch (error) {
+      console.warn("[Autoplay] Could not send the autoplay-stall notification.", error);
+    }
     return true;
   }
 
@@ -1518,6 +1547,9 @@ export class AutoplayController {
       const targetSummary = scoreLegalMoveTargets(moveTargets.targets, moveTargets.multiple, targetIndex => {
         const target = targetIndex === BattlerIndex.ATTACKER ? pokemon : globalScene.getField()[targetIndex];
         if (!target) {
+          return;
+        }
+        if (pokemon.isMoveTargetRestricted(pokemonMove.moveId, target)) {
           return;
         }
         const targetIsAlly = target.isPlayer() === pokemon.isPlayer();
@@ -2226,8 +2258,9 @@ export class AutoplayController {
     this.manualOverride = manualOverride;
     this.statusNote = enabled ? "" : statusNote;
     this.progressSignature = "";
-    this.progressPhase = null;
+    this.progressBattle = null;
     this.progressObservedAt = null;
+    this.progressActiveMs = 0;
     this.nextActionAt = 0;
     this.storeEnabled();
     this.storeStats();

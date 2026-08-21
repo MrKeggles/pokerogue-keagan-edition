@@ -26,6 +26,12 @@ const {
   parseAllowedExternalUrl,
   resolveAppPath,
 } = require("./protocol-helpers.cjs");
+const {
+  AUTOPLAY_LOG_FILENAME,
+  appendAutoplayLog,
+  formatAutoplayLogEntry,
+  shouldPersistRendererLog,
+} = require("./autoplay-log.cjs");
 const { startAutoUpdates } = require("./updater.cjs");
 
 const PRODUCT_NAME = "PokéRogue Keagan Edition";
@@ -70,7 +76,29 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.setName(PRODUCT_NAME);
+app.setAppLogsPath();
 app.userAgentFallback = DESKTOP_USER_AGENT;
+const AUTOPLAY_LOG = path.join(app.getPath("logs"), AUTOPLAY_LOG_FILENAME);
+
+let autoplayLogWriteFailureReported = false;
+
+/** @param {{ message?: unknown, level?: unknown, sourceId?: unknown, lineNumber?: unknown }} details */
+function writeAutoplayLog(details) {
+  const written = appendAutoplayLog(AUTOPLAY_LOG, formatAutoplayLogEntry(details));
+  if (!written && !autoplayLogWriteFailureReported) {
+    autoplayLogWriteFailureReported = true;
+    logStartup(`Could not write autoplay diagnostics to ${AUTOPLAY_LOG}`);
+  }
+}
+
+function startAutoplayLogSession() {
+  writeAutoplayLog({
+    level: "info",
+    message: `[Autoplay] Desktop session started (version ${app.getVersion()}, ${IS_DEV ? "development" : "packaged"}). Log: ${AUTOPLAY_LOG}`,
+    sourceId: "electron/main.cjs",
+  });
+  logStartup(`Autoplay diagnostic log: ${AUTOPLAY_LOG}`);
+}
 
 /** @param {string} message */
 function logStartup(message) {
@@ -274,12 +302,17 @@ async function createWindow() {
       webSecurity: true,
       allowRunningInsecureContent: false,
       navigateOnDragDrop: false,
+      // AFK battles must keep receiving Phaser animation/timer updates while the window is minimized or occluded.
+      backgroundThrottling: false,
       devTools: IS_DEV,
     },
   });
   mainWindow.webContents.setUserAgent(DESKTOP_USER_AGENT);
 
   mainWindow.webContents.on("console-message", details => {
+    if (shouldPersistRendererLog(details)) {
+      writeAutoplayLog(details);
+    }
     if (details.level === "error") {
       logStartup(
         `Renderer console error: ${details.message.slice(0, 2_000)} (${details.sourceId}:${details.lineNumber})`,
@@ -373,6 +406,25 @@ async function waitForGameCanvas(mainWindow) {
   }
 }
 
+/**
+ * @param {string} expectedEntry
+ * @param {number} [timeoutMs]
+ */
+async function waitForAutoplayLogEntry(expectedEntry, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (fs.readFileSync(AUTOPLAY_LOG, "utf8").includes(expectedEntry)) {
+        return;
+      }
+    } catch {
+      // The console event and first write may still be pending.
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`Autoplay diagnostics did not reach ${AUTOPLAY_LOG}`);
+}
+
 async function runSmokeTest() {
   const mainWindow = await createWindow();
   const storageKey = "pokerogue.desktop.smoke-test";
@@ -403,6 +455,10 @@ async function runSmokeTest() {
 
     await waitForGameCanvas(mainWindow);
 
+    const autoplayLogMarker = `[Autoplay] desktop smoke marker ${Date.now()}`;
+    await mainWindow.webContents.executeJavaScript(`console.info(${JSON.stringify(autoplayLogMarker)})`, true);
+    await waitForAutoplayLogEntry(autoplayLogMarker);
+
     const documentResponse = await net.fetch(APP_URL, { bypassCustomProtocolHandlers: false });
     const contentSecurityPolicy = documentResponse.headers.get("Content-Security-Policy");
     await documentResponse.body?.cancel();
@@ -430,7 +486,7 @@ async function runSmokeTest() {
       throw new Error("API smoke request did not return a JSON object");
     }
 
-    const message = `Desktop smoke test passed (${APP_URL}, Phaser canvas, persistent localStorage, CSP, branded title, renderer API HTTP ${apiResponse.status})`;
+    const message = `Desktop smoke test passed (${APP_URL}, Phaser canvas, persistent localStorage, persistent autoplay diagnostics, CSP, branded title, renderer API HTTP ${apiResponse.status})`;
     logStartup(message);
     console.log(message);
   } finally {
@@ -469,6 +525,7 @@ if (hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    startAutoplayLogSession();
     logStartup("App ready");
     app.setAppUserModelId(APP_ID);
     configureSessionPermissions();

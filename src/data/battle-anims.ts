@@ -438,6 +438,7 @@ class AnimTimedAddBgEvent extends AnimTimedBgEvent {
 
 export const moveAnims = new Map<MoveId, AnimConfig | [AnimConfig, AnimConfig] | null>();
 export const chargeAnims = new Map<ChargeAnim, AnimConfig | [AnimConfig, AnimConfig] | null>();
+const chargeAnimLoads = new Map<ChargeAnim, Promise<void>>();
 export const commonAnims = new Map<CommonAnim, AnimConfig>();
 export const encounterAnims = new Map<EncounterAnim, AnimConfig>();
 
@@ -563,34 +564,45 @@ export async function initEncounterAnims(encounterAnim: EncounterAnim | Encounte
   await Promise.allSettled(encounterAnimFetches);
 }
 
-export function initMoveChargeAnim(chargeAnim: ChargeAnim): Promise<void> {
-  return new Promise(resolve => {
-    if (chargeAnims.has(chargeAnim)) {
-      if (chargeAnims.get(chargeAnim) === null) {
-        const loadedCheckTimer = setInterval(() => {
-          if (chargeAnims.get(chargeAnim) !== null) {
-            clearInterval(loadedCheckTimer);
-            resolve();
-          }
-        }, 50);
-      } else {
-        resolve();
+export function initMoveChargeAnim(chargeAnim: ChargeAnim, fetchAnim: typeof cachedFetch = cachedFetch): Promise<void> {
+  const loadedAnim = chargeAnims.get(chargeAnim);
+  if (loadedAnim) {
+    return Promise.resolve();
+  }
+
+  const pendingLoad = chargeAnimLoads.get(chargeAnim);
+  if (pendingLoad) {
+    return pendingLoad;
+  }
+
+  chargeAnims.set(chargeAnim, null);
+  const chargeAnimName = toKebabCase(ChargeAnim[chargeAnim]);
+  const loadPromise = Promise.resolve()
+    .then(() => fetchAnim(`./battle-anims/${chargeAnimName}.json`))
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
       }
-    } else {
-      chargeAnims.set(chargeAnim, null);
-      cachedFetch(`./battle-anims/${toKebabCase(ChargeAnim[chargeAnim])}.json`)
-        .then(response => response.json())
-        .then(ca => {
-          if (Array.isArray(ca)) {
-            populateMoveChargeAnim(chargeAnim, ca[0]);
-            populateMoveChargeAnim(chargeAnim, ca[1]);
-          } else {
-            populateMoveChargeAnim(chargeAnim, ca);
-          }
-          resolve();
-        });
-    }
-  });
+      return response.json();
+    })
+    .then(ca => {
+      if (Array.isArray(ca)) {
+        populateMoveChargeAnim(chargeAnim, ca[0]);
+        populateMoveChargeAnim(chargeAnim, ca[1]);
+      } else {
+        populateMoveChargeAnim(chargeAnim, ca);
+      }
+    })
+    .catch(error => {
+      console.warn(`[Battle recovery] Could not load charge animation file '${chargeAnimName}'`, error);
+      chargeAnims.set(chargeAnim, new AnimConfig());
+    })
+    .finally(() => {
+      chargeAnimLoads.delete(chargeAnim);
+    });
+
+  chargeAnimLoads.set(chargeAnim, loadPromise);
+  return loadPromise;
 }
 
 function populateMoveAnim(move: MoveId, animSource: any): void {

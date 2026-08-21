@@ -8,6 +8,7 @@ import type { MoveUseMode } from "#enums/move-use-mode";
 import type { Pokemon } from "#field/pokemon";
 import { applyMoveChargeAttrs } from "#moves/apply-attrs";
 import type { PokemonMove } from "#moves/pokemon-move";
+import { BATTLE_ANIM_PHASE_TIMEOUT_MS, createPhaseCompletionGuard } from "#phases/phase-completion-guard";
 import { PokemonPhase } from "#phases/pokemon-phase";
 import type { ChargingMove } from "#types/move-types";
 import { BooleanHolder } from "#utils/common";
@@ -49,18 +50,30 @@ export class MoveChargePhase extends PokemonPhase {
     // If the target is somehow not defined, or the move is somehow not a ChargingMove,
     // immediately end this phase.
     if (!target || !move.isChargingMove()) {
-      console.warn("Invalid parameters for MoveChargePhase");
+      console.warn("[Battle recovery] Invalid parameters for MoveChargePhase");
       super.end();
       return;
     }
 
-    new MoveChargeAnim(move.chargeAnim, move.id, user).play(false, () => {
-      move.showChargeText(user, target);
+    const complete = createPhaseCompletionGuard(
+      this,
+      BATTLE_ANIM_PHASE_TIMEOUT_MS,
+      `Move charge animation timed out after ${BATTLE_ANIM_PHASE_TIMEOUT_MS}ms; continuing the battle.`,
+      () => {
+        move.showChargeText(user, target);
 
-      applyMoveChargeAttrs("MoveEffectAttr", user, target, move);
-      user.addTag(BattlerTagType.CHARGING, 1, move.id, user.id);
-      this.end();
-    });
+        applyMoveChargeAttrs("MoveEffectAttr", user, target, move);
+        user.addTag(BattlerTagType.CHARGING, 1, move.id, user.id);
+        this.end();
+      },
+    );
+
+    try {
+      new MoveChargeAnim(move.chargeAnim, move.id, user).play(false, complete);
+    } catch (error) {
+      console.error("[Battle recovery] Move charge animation failed; continuing the battle.", error);
+      complete();
+    }
   }
 
   /** Checks the move's instant charge conditions, then ends this phase. */

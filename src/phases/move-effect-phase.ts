@@ -34,6 +34,7 @@ import {
 import { applyFilteredMoveAttrs, applyMoveAttrs } from "#moves/apply-attrs";
 import type { Move, MoveAttr } from "#moves/move";
 import { isFieldTargeted } from "#moves/move-utils";
+import { BATTLE_ANIM_PHASE_TIMEOUT_MS, createPhaseCompletionGuard } from "#phases/phase-completion-guard";
 import { PokemonPhase } from "#phases/pokemon-phase";
 import { DamageAchv } from "#system/achv";
 import type { nil } from "#types/common";
@@ -180,20 +181,38 @@ export class MoveEffectPhase extends PokemonPhase {
       const moveTargets = this.getTargets();
       const targetsForAnimation = moveTargets.length > 0 ? moveTargets : [user];
       let animationsLeft = targetsForAnimation.length;
+      const complete = createPhaseCompletionGuard(
+        this,
+        BATTLE_ANIM_PHASE_TIMEOUT_MS,
+        `Move effect animation timed out after ${BATTLE_ANIM_PHASE_TIMEOUT_MS}ms; continuing the battle.`,
+        () => this.postAnimCallback(user, targets),
+      );
 
       for (const target of targetsForAnimation) {
-        new MoveAnim(
-          move.id as MoveId,
-          user,
-          target.getBattlerIndex(),
-          // Some moves used in mystery encounters should be played even on an empty field
-          globalScene.currentBattle?.mysteryEncounter?.hasBattleAnimationsWithoutTargets ?? false,
-        ).play(move.hitsSubstitute(user, target), () => {
+        let animationCompleted = false;
+        const completeAnimation = () => {
+          if (animationCompleted) {
+            return;
+          }
+          animationCompleted = true;
           animationsLeft--;
           if (animationsLeft === 0) {
-            this.postAnimCallback(user, targets);
+            complete();
           }
-        });
+        };
+
+        try {
+          new MoveAnim(
+            move.id as MoveId,
+            user,
+            target.getBattlerIndex(),
+            // Some moves used in mystery encounters should be played even on an empty field
+            globalScene.currentBattle?.mysteryEncounter?.hasBattleAnimationsWithoutTargets ?? false,
+          ).play(move.hitsSubstitute(user, target), completeAnimation);
+        } catch (error) {
+          console.error("[Battle recovery] Move effect animation failed; continuing the battle.", error);
+          completeAnimation();
+        }
       }
       return;
     }
@@ -265,7 +284,7 @@ export class MoveEffectPhase extends PokemonPhase {
     try {
       this.applyToTargets(user, targets);
     } catch (e) {
-      console.warn(e.message || "Unexpected error in move effect phase");
+      console.warn("[Battle recovery] Unexpected error in move effect phase; continuing the battle.", e);
       this.end();
       return;
     }

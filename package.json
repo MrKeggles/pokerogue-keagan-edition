@@ -1,7 +1,7 @@
 {
   "name": "pokemon-rogue-battle",
   "private": true,
-  "version": "1.12.6",
+  "version": "1.12.7",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -26,7 +26,7 @@
     "site:test": "node website/release-client.test.cjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:desktop": "node electron/protocol-helpers.test.cjs && node electron/updater.test.cjs",
+    "test:desktop": "node electron/protocol-helpers.test.cjs && node electron/autoplay-log.test.cjs && node electron/updater.test.cjs",
     "test:profile": "vite-node scripts/profiling/profiling.ts",
     "test:cov": "vitest run --silent='passed-only' --coverage",
     "test:types": "vitest run --typecheck.only",

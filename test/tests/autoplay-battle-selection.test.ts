@@ -8,17 +8,25 @@ import { pokerogueApi } from "#api/api";
 import { AutoplayController } from "#app/autoplay-controller";
 import { allMoves } from "#data/data-lists";
 import { AbilityId } from "#enums/ability-id";
+import { BattlerTagType } from "#enums/battler-tag-type";
 import { Command } from "#enums/command";
 import { MoveId } from "#enums/move-id";
 import { MoveUseMode } from "#enums/move-use-mode";
 import { SpeciesId } from "#enums/species-id";
-import type { PlayerPokemon } from "#field/pokemon";
+import type { PlayerPokemon, Pokemon } from "#field/pokemon";
 import { GameManager } from "#test/framework/game-manager";
 import Phaser from "phaser";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface AutoplayBattleHarness {
   chooseMove: (pokemon: PlayerPokemon) => { index: number; score: number; targetIndex: number | undefined };
+  scoreMoveForTarget: (
+    user: PlayerPokemon,
+    target: Pokemon,
+    moveIndex: number,
+    targetIsAlly: boolean,
+    incomingThreat: { damage: number; priority: number; source: Pokemon | null },
+  ) => number;
   template: "FAST_FARM";
 }
 
@@ -98,6 +106,37 @@ describe("Autoplay live battle selection", () => {
     controller.template = "FAST_FARM";
     controller.chooseMove(player);
     expect(enemy.turnData.moveEffectiveness).toBeNull();
+  });
+
+  it("keeps matchup forecasting simulated so it cannot queue real battle messages", async () => {
+    game.override.moveset([MoveId.TACKLE]).enemySpecies(SpeciesId.BULBASAUR).enemyMoveset([MoveId.TACKLE]);
+    await game.classicMode.startBattle(SpeciesId.SQUIRTLE);
+
+    const player = game.field.getPlayerPokemon();
+    const enemy = game.field.getEnemyPokemon();
+    const getAttackTypeEffectiveness = vi.spyOn(player, "getAttackTypeEffectiveness");
+
+    player.getMatchupScore(enemy);
+
+    expect(getAttackTypeEffectiveness).toHaveBeenCalledTimes(enemy.getTypes({ useIllusion: true }).length);
+    expect(getAttackTypeEffectiveness.mock.calls.every(([, params]) => params?.simulated === true)).toBe(true);
+  });
+
+  it("does not score a move target that the battle engine will reject", async () => {
+    game.override.battleStyle("double").moveset([MoveId.POLLEN_PUFF]).enemyMoveset([MoveId.SPLASH]);
+    await game.classicMode.startBattle(SpeciesId.BUTTERFREE, SpeciesId.BULBASAUR);
+
+    const [player, ally] = game.scene.getPlayerField();
+    const controller = Object.create(AutoplayController.prototype) as AutoplayBattleHarness;
+    controller.template = "FAST_FARM";
+    ally.addTag(BattlerTagType.HEAL_BLOCK);
+    const scoreMoveForTarget = vi.spyOn(controller, "scoreMoveForTarget");
+
+    const choice = controller.chooseMove(player);
+
+    expect(player.isMoveTargetRestricted(MoveId.POLLEN_PUFF, ally)).toBe(true);
+    expect(choice.targetIndex).toBeGreaterThanOrEqual(2);
+    expect(scoreMoveForTarget.mock.calls.some(([, target]) => target === ally)).toBe(false);
   });
 
   it.each([

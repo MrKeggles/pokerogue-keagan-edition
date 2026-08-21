@@ -1042,8 +1042,9 @@ describe("Autoplay controller policies", () => {
         plannerBattleWave: number;
         plannerCircuitOpen: boolean;
         plannerErrorCount: number;
+        progressActiveMs: number;
+        progressBattle: unknown;
         progressObservedAt: number | null;
-        progressPhase: unknown;
         progressSignature: string;
         setEnabled: (enabled: boolean, manualOverride?: boolean, statusNote?: string) => void;
         statusNote: string;
@@ -1075,8 +1076,9 @@ describe("Autoplay controller policies", () => {
       controller.plannerBattleWave = -1;
       controller.plannerCircuitOpen = false;
       controller.plannerErrorCount = 0;
+      controller.progressActiveMs = 0;
+      controller.progressBattle = null;
       controller.progressObservedAt = null;
-      controller.progressPhase = null;
       controller.progressSignature = "";
       controller.statusNote = "STOP RULE: WAVE 10";
       controller.stopRules = {
@@ -1142,44 +1144,150 @@ describe("Autoplay controller policies", () => {
       expect(controller.lastUpdateTime).toBe(5_000);
     });
 
-    it("pauses with phase and mode after a true unchanged-state stall", () => {
+    it("pauses after continuous active updates in one battle turn even when phases churn", () => {
       const previousScene = globalScene;
       let phase: { phaseName: string } = { phaseName: "CommandPhase" };
+      let mode = UiMode.COMMAND;
+      const battle = { turn: 7, waveIndex: 4 };
       initGlobalScene({
-        currentBattle: { waveIndex: 4 },
+        currentBattle: battle,
         phaseManager: { getCurrentPhase: () => phase },
-        ui: { getMode: () => UiMode.COMMAND },
+        ui: { getMode: () => mode },
       } as unknown as Parameters<typeof initGlobalScene>[0]);
       const pauseForSafety = vi.fn();
+      const notificationError = new Error("notifications unavailable");
+      const emitNotification = vi.fn(() => {
+        throw notificationError;
+      });
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const controller = Object.create(AutoplayController.prototype) as unknown as {
+        emitNotification: (event: string, details: string) => void;
         pauseForSafety: (reason: string) => void;
         pauseIfStalled: (time: number) => boolean;
+        progressActiveMs: number;
+        progressBattle: unknown;
         progressObservedAt: number | null;
-        progressPhase: unknown;
         progressSignature: string;
         runtimeStatus: string;
         updateBadge: () => void;
       };
+      controller.emitNotification = emitNotification;
       controller.pauseForSafety = pauseForSafety;
+      controller.progressActiveMs = 0;
+      controller.progressBattle = null;
       controller.progressObservedAt = null;
-      controller.progressPhase = null;
       controller.progressSignature = "";
       controller.runtimeStatus = "";
       controller.updateBadge = vi.fn();
 
       try {
         expect(controller.pauseIfStalled(1_000)).toBe(false);
-        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS - 1)).toBe(false);
-
+        for (let time = 2_000; time < 1_000 + AUTOPLAY_STALL_TIMEOUT_MS; time += 1_000) {
+          const cycle = time % 3_000;
+          phase = { phaseName: cycle === 0 ? "SelectTargetPhase" : cycle === 1_000 ? "MessagePhase" : "CommandPhase" };
+          mode = cycle === 0 ? UiMode.TARGET_SELECT : cycle === 1_000 ? UiMode.MESSAGE : UiMode.COMMAND;
+          expect(controller.pauseIfStalled(time)).toBe(false);
+        }
+        // Neither equivalent-object recreation nor cross-phase churn is meaningful turn progress.
         phase = { phaseName: "CommandPhase" };
-        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS)).toBe(false);
-        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS * 2)).toBe(true);
+        mode = UiMode.COMMAND;
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS)).toBe(true);
       } finally {
         initGlobalScene(previousScene);
       }
 
       expect(pauseForSafety).toHaveBeenCalledWith("STALLED: CommandPhase/COMMAND");
-      expect(controller.runtimeStatus).toBe("CommandPhase/COMMAND/W4");
+      expect(emitNotification).toHaveBeenCalledWith(
+        "Battle stalled",
+        "No turn progress was detected on wave 4, turn 7 (last state: CommandPhase/COMMAND); AFK mode was stopped safely.",
+      );
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "[Autoplay] Could not send the autoplay-stall notification.",
+        notificationError,
+      );
+      expect(controller.runtimeStatus).toBe("CommandPhase/COMMAND/W4/T7");
+    });
+
+    it("does not mistake one background-suspension clock jump for an active stall", () => {
+      const previousScene = globalScene;
+      initGlobalScene({
+        currentBattle: { turn: 7, waveIndex: 4 },
+        phaseManager: { getCurrentPhase: () => ({ phaseName: "MoveEffectPhase" }) },
+        ui: { getMode: () => UiMode.MESSAGE },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        emitNotification: (event: string, details: string) => void;
+        pauseForSafety: (reason: string) => void;
+        pauseIfStalled: (time: number) => boolean;
+        progressActiveMs: number;
+        progressBattle: unknown;
+        progressObservedAt: number | null;
+        progressSignature: string;
+        runtimeStatus: string;
+        updateBadge: () => void;
+      };
+      controller.emitNotification = vi.fn();
+      controller.pauseForSafety = pauseForSafety;
+      controller.progressActiveMs = 0;
+      controller.progressBattle = null;
+      controller.progressObservedAt = null;
+      controller.progressSignature = "";
+      controller.runtimeStatus = "";
+      controller.updateBadge = vi.fn();
+
+      try {
+        expect(controller.pauseIfStalled(1_000)).toBe(false);
+        expect(controller.pauseIfStalled(1_000 + AUTOPLAY_STALL_TIMEOUT_MS * 10)).toBe(false);
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).not.toHaveBeenCalled();
+      expect(controller.progressActiveMs).toBeLessThan(AUTOPLAY_STALL_TIMEOUT_MS);
+    });
+
+    it("treats advancing post-battle phases as progress even while the battle object remains allocated", () => {
+      const previousScene = globalScene;
+      let phaseName = "EvolutionPhase";
+      const battle = { turn: 7, waveIndex: 4 };
+      initGlobalScene({
+        currentBattle: battle,
+        phaseManager: { getCurrentPhase: () => ({ phaseName }) },
+        ui: { getMode: () => UiMode.MESSAGE },
+      } as unknown as Parameters<typeof initGlobalScene>[0]);
+      const pauseForSafety = vi.fn();
+      const controller = Object.create(AutoplayController.prototype) as unknown as {
+        emitNotification: (event: string, details: string) => void;
+        pauseForSafety: (reason: string) => void;
+        pauseIfStalled: (time: number) => boolean;
+        progressActiveMs: number;
+        progressBattle: unknown;
+        progressObservedAt: number | null;
+        progressSignature: string;
+        runtimeStatus: string;
+        updateBadge: () => void;
+      };
+      controller.emitNotification = vi.fn();
+      controller.pauseForSafety = pauseForSafety;
+      controller.progressActiveMs = 0;
+      controller.progressBattle = null;
+      controller.progressObservedAt = null;
+      controller.progressSignature = "";
+      controller.runtimeStatus = "";
+      controller.updateBadge = vi.fn();
+
+      try {
+        for (let time = 1_000; time <= 1_000 + AUTOPLAY_STALL_TIMEOUT_MS; time += 1_000) {
+          const cycle = time % 3_000;
+          phaseName = cycle === 0 ? "LevelUpPhase" : cycle === 1_000 ? "MessagePhase" : "EvolutionPhase";
+          expect(controller.pauseIfStalled(time)).toBe(false);
+        }
+      } finally {
+        initGlobalScene(previousScene);
+      }
+
+      expect(pauseForSafety).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1196,15 +1304,17 @@ describe("Autoplay controller policies", () => {
       const controller = Object.create(AutoplayController.prototype) as unknown as {
         pauseForSafety: (reason: string) => void;
         pauseIfStalled: (time: number) => boolean;
+        progressActiveMs: number;
+        progressBattle: unknown;
         progressObservedAt: number | null;
-        progressPhase: unknown;
         progressSignature: string;
         runtimeStatus: string;
         updateBadge: () => void;
       };
       controller.pauseForSafety = pauseForSafety;
+      controller.progressActiveMs = 0;
+      controller.progressBattle = null;
       controller.progressObservedAt = null;
-      controller.progressPhase = null;
       controller.progressSignature = "";
       controller.runtimeStatus = "";
       controller.updateBadge = vi.fn();

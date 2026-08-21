@@ -126,4 +126,4 @@ Then verify the packaged application manually:
 5. Confirm normal player input immediately stops AFK mode.
 6. Open `AFK Bot Help` from the title menu and return to the title screen.
 
-If startup fails, inspect `%TEMP%\PokeRogue-Keagan-Startup.log`. Do not share session tokens, cookies, or browser-profile data when sending logs.
+If startup fails, inspect `%TEMP%\PokeRogue-Keagan-Startup.log`. For an AFK or battle stall, collect `%APPDATA%\PokéRogue Keagan Edition\logs\Autoplay.log` and, when present, its rotated `Autoplay.log.1` backup. Do not share session tokens, cookies, or browser-profile data when sending logs.

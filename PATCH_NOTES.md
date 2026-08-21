@@ -5,6 +5,25 @@ SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 # PokéRogue Keagan Edition Patch Notes
 
+## Version 1.12.7 - 21 August 2026
+
+### Battle freeze recovery
+
+- Fixed silent battle stalls when a move animation, charge animation, or dynamically loaded animation never finishes. Battle-owned completion guards now recover safely after a bounded wait and ignore stale late callbacks.
+- Charge-animation assets now share one in-flight load and fall back cleanly when a file is missing, corrupt, or rejected, instead of leaving every waiting battle unresolved.
+- AFK mode now detects command, target-selection, and message loops that make no real turn progress. Background suspension and legitimate post-battle reward, evolution, and move-learning progress do not count as battle stalls.
+- Autoplay filters restricted move targets before scoring them, including a Heal Blocked ally for Pollen Puff, and matchup planning no longer queues real Strong Winds battle messages.
+- Desktop rendering is allowed to keep ticking while minimized so unattended runs are not paused by Electron background throttling.
+
+### Retained diagnostics
+
+- The desktop app now keeps timestamped autoplay and battle-recovery diagnostics in `%APPDATA%\PokéRogue Keagan Edition\logs\Autoplay.log`.
+- The log rotates at 1 MiB and retains one backup as `Autoplay.log.1`, making a future silent stall reportable without allowing unbounded disk usage.
+
+### Updating from 1.12.6
+
+Accept the update prompt in an installed 1.12.6 build, or install version 1.12.7 over the existing copy. Login, saves, settings, AFK statistics, and the desktop profile remain in place.
+
 ## Version 1.12.6 - 20 August 2026
 
 ### AFK/autoplay reliability

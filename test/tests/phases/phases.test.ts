@@ -42,8 +42,10 @@ describe("Phases", () => {
         getOptionsWithScroll: () => { label: string }[];
       };
       expect(handler.getOptionsWithScroll().map(option => option.label)).toContain("Patch Notes");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.5 PATCH NOTES");
-      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Sandstorm no longer freezes runs");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("VERSION 1.12.7 PATCH NOTES");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Animation stalls recover safely");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Autoplay.log is retained in desktop logs");
+      expect(KEAGAN_PATCH_NOTES_TEXT).toContain("Rotates at 1 MiB to Autoplay.log.1");
     });
   });
 

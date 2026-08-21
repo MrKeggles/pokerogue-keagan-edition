@@ -2,14 +2,14 @@ import { globalScene } from "#app/global-scene";
 import { CommonBattleAnim } from "#data/battle-anims";
 import type { BattlerIndex } from "#enums/battler-index";
 import type { CommonAnim } from "#enums/move-anims-common";
+import { BATTLE_ANIM_PHASE_TIMEOUT_MS, createPhaseCompletionGuard } from "#phases/phase-completion-guard";
 import { PokemonPhase } from "#phases/pokemon-phase";
 
 /**
  * Common animations are cosmetic and should never be able to stop battle progression indefinitely.
  * The longest shipped animation completes comfortably within this limit, including its audio tail.
  */
-export const COMMON_ANIM_PHASE_TIMEOUT_MS = 20_000;
-const COMMON_ANIM_STANDBY_RECHECK_MS = 50;
+export const COMMON_ANIM_PHASE_TIMEOUT_MS = BATTLE_ANIM_PHASE_TIMEOUT_MS;
 
 export class CommonAnimPhase extends PokemonPhase {
   // PokemonHealPhase extends CommonAnimPhase, and to make typescript happy,
@@ -32,47 +32,11 @@ export class CommonAnimPhase extends PokemonPhase {
   }
 
   start(): void {
-    let completed = false;
-    let completionTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const clearCompletionTimer = () => {
-      if (completionTimer !== undefined) {
-        clearTimeout(completionTimer);
-        completionTimer = undefined;
-      }
-    };
-
-    const complete = () => {
-      if (completed) {
-        return;
-      }
-
-      const phaseManager = globalScene.phaseManager;
-      if (phaseManager.getCurrentPhase() === this) {
-        completed = true;
-        clearCompletionTimer();
-        this.end();
-        return;
-      }
-
-      if (phaseManager.getStandbyPhase() === this) {
-        // An overriding phase is temporarily active. It will restore this phase without restarting it, so defer
-        // completion until that restoration occurs while retaining a single timer.
-        clearCompletionTimer();
-        completionTimer = setTimeout(complete, COMMON_ANIM_STANDBY_RECHECK_MS);
-        return;
-      }
-
-      // The queue was reset while the animation was running. Discard its stale callback without advancing the newer
-      // phase that is active now.
-      completed = true;
-      clearCompletionTimer();
-    };
-
-    completionTimer = setTimeout(() => {
-      console.warn(`Common battle animation timed out after ${COMMON_ANIM_PHASE_TIMEOUT_MS}ms; continuing the battle.`);
-      complete();
-    }, COMMON_ANIM_PHASE_TIMEOUT_MS);
+    const complete = createPhaseCompletionGuard(
+      this,
+      COMMON_ANIM_PHASE_TIMEOUT_MS,
+      `Common battle animation timed out after ${COMMON_ANIM_PHASE_TIMEOUT_MS}ms; continuing the battle.`,
+    );
 
     try {
       const pokemon = this.getPokemon();
@@ -82,7 +46,7 @@ export class CommonAnimPhase extends PokemonPhase {
           : (this.player ? globalScene.getEnemyField() : globalScene.getPlayerField())[this.targetIndex];
       new CommonBattleAnim(this.anim, pokemon, target).play(false, complete);
     } catch (error) {
-      console.error("Common battle animation failed; continuing the battle.", error);
+      console.error("[Battle recovery] Common battle animation failed; continuing the battle.", error);
       complete();
     }
   }
