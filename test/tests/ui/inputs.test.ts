@@ -1,3 +1,4 @@
+import { shouldIgnoreGameplayKeyboardEvent } from "#app/inputs-controller";
 import { Button } from "#enums/buttons";
 import { CFG_KEYBOARD_QWERTY } from "#inputs/cfg-keyboard-qwerty";
 import { PAD_XBOX360 } from "#inputs/pad-xbox360";
@@ -100,6 +101,57 @@ describe("Inputs", () => {
     expect(game.inputsHandler.log[0].repeat).toBe(false);
     expect(inputController.buttonLock).toEqual([]);
     game.scene.input.keyboard?.emit("keyup", { keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_ARROW_UP });
+  });
+
+  it("keyboard - keeps OS shortcuts and autoplay hotkeys out of gameplay input", () => {
+    expect(
+      shouldIgnoreGameplayKeyboardEvent({
+        altKey: true,
+        code: "Tab",
+        ctrlKey: false,
+        isComposing: false,
+        metaKey: false,
+        repeat: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldIgnoreGameplayKeyboardEvent({
+        altKey: false,
+        code: "KeyS",
+        ctrlKey: false,
+        isComposing: false,
+        metaKey: true,
+        repeat: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldIgnoreGameplayKeyboardEvent({
+        altKey: false,
+        code: "F8",
+        ctrlKey: false,
+        isComposing: false,
+        metaKey: false,
+        repeat: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldIgnoreGameplayKeyboardEvent({
+        altKey: false,
+        code: "ArrowUp",
+        ctrlKey: false,
+        isComposing: false,
+        metaKey: false,
+        repeat: false,
+      }),
+    ).toBe(false);
+
+    game.scene.input.keyboard?.emit("keydown", {
+      code: "ShiftLeft",
+      keyCode: CFG_KEYBOARD_QWERTY.deviceMapping.KEY_SHIFT,
+      metaKey: true,
+      repeat: false,
+    });
+    expect(game.inputsHandler.log).toHaveLength(0);
   });
 
   it("gamepad - test input holding for 1ms - 1 input", async () => {

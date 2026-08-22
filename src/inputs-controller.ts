@@ -30,7 +30,22 @@ import { deepCopy } from "#utils/data";
 import { getEnumValues } from "#utils/enums";
 import Phaser from "phaser";
 
+const AUTOPLAY_RESERVED_KEY_CODES = new Set(["F8", "F9"]);
 const repeatInputDelayMillis = 250;
+
+/** Prevent OS shortcuts and reserved autoplay hotkeys from entering the gameplay input stream. */
+export function shouldIgnoreGameplayKeyboardEvent(
+  event: Pick<KeyboardEvent, "altKey" | "code" | "ctrlKey" | "isComposing" | "metaKey" | "repeat">,
+): boolean {
+  return (
+    event.repeat
+    || event.isComposing
+    || event.altKey
+    || event.ctrlKey
+    || event.metaKey
+    || AUTOPLAY_RESERVED_KEY_CODES.has(event.code)
+  );
+}
 
 /**
  * Manages and handles all input controls for the game, including keyboard and gamepad interactions.
@@ -350,9 +365,8 @@ export class InputsController {
   keyboardKeyDown(event: KeyboardEvent): void {
     this.lastSource = "keyboard";
     // `deactivatePressedKey` intentionally clears our repeat timers when autoplay is enabled.
-    // The browser can still deliver native repeat keydowns for a key that was already held;
-    // treating one as a fresh press would immediately disable autoplay again.
-    if (event.repeat) {
+    // Native repeats, OS shortcuts, and reserved autoplay hotkeys are not fresh gameplay input.
+    if (shouldIgnoreGameplayKeyboardEvent(event)) {
       return;
     }
     this.ensureKeyboardIsInit();

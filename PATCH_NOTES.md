@@ -5,6 +5,18 @@ SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 # PokéRogue Keagan Edition Patch Notes
 
+## Version 1.12.8 - 22 August 2026
+
+### Egg-hatch progression
+
+- Fixed runs freezing in `EggLapsePhase` immediately after an EXP message when two or more eggs were ready and **Egg Skip** was set to **Never**.
+- The **Never** setting now queues the normal egg-hatching sequence and advances the phase instead of leaving the previous message onscreen indefinitely.
+- Alt+Tab, screenshots, and the reserved F8/F9 hotkeys no longer masquerade as gameplay input and disable AFK mode while checking another window.
+
+### Updating from 1.12.7
+
+Close a running 1.12.7 copy, then install version 1.12.8 over the existing copy. Login, saves, settings, AFK statistics, and the desktop profile remain in place.
+
 ## Version 1.12.7 - 21 August 2026
 
 ### Battle freeze recovery

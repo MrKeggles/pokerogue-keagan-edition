@@ -790,15 +790,9 @@ export class AutoplayController {
       return;
     }
 
-    if (
-      event.code !== TOGGLE_KEY
-      && event.code !== TOGGLE_TEMPLATE_KEY
-      && this.enabled
-      && !event.repeat
-      && !event.isComposing
-    ) {
-      this.setEnabled(false, true);
-    }
+    // Gameplay key presses arrive through the input controller's semantic `input_down` event.
+    // Raw window events also include OS shortcuts such as Alt+Tab and Win+Shift+S, which must
+    // not be mistaken for a manual takeover.
   };
   private readonly manualInputHandler = (event?: AutoplayInputEvent): void => {
     if (!shouldPauseAutoplayForManualInput(this.enabled, event)) {
